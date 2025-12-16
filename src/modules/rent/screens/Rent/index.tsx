@@ -1,42 +1,54 @@
 import React from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { View, Text, ScrollView, StatusBar } from 'react-native';
 import styled from 'styled-components/native';
+import { MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
 import { theme } from '../../../../core/theme';
 import { Card } from '../../../../core/components';
 
 const Container = styled(ScrollView)`
   flex: 1;
-  background-color: #F8F8F8;
+  background-color: ${theme.colors.background};
 `;
 
 const Header = styled(View)`
-  background-color: ${theme.colors.success};
+  background-color: ${theme.colors.primary};
   padding: ${theme.spacing.l}px;
   padding-top: 60px;
+  padding-bottom: 40px;
+  border-bottom-left-radius: ${theme.radius.xl}px;
+  border-bottom-right-radius: ${theme.radius.xl}px;
+  
+  shadow-color: ${theme.colors.primary};
+  shadow-offset: 0px 4px;
+  shadow-opacity: 0.2;
+  shadow-radius: 8px;
+  elevation: 5;
 `;
 
 const HeaderTitle = styled(Text)`
-  font-size: 28px;
-  font-weight: bold;
-  color: ${theme.colors.background};
-  margin-bottom: ${theme.spacing.s}px;
+  font-size: ${theme.typography.sizes.xl}px;
+  font-weight: ${theme.typography.weights.bold};
+  color: ${theme.colors.surface};
+  margin-bottom: ${theme.spacing.xs}px;
 `;
 
 const HeaderSubtitle = styled(Text)`
-  font-size: 14px;
-  color: ${theme.colors.background};
+  font-size: ${theme.typography.sizes.s}px;
+  color: ${theme.colors.surface};
   opacity: 0.9;
 `;
 
 const ContentContainer = styled(View)`
-  padding: ${theme.spacing.m}px;
+  padding: ${theme.spacing.l}px;
+  margin-top: -10px;
 `;
 
 const SectionTitle = styled(Text)`
-  font-size: 20px;
-  font-weight: bold;
+  font-size: ${theme.typography.sizes.l}px;
+  font-weight: ${theme.typography.weights.bold};
   color: ${theme.colors.text};
   margin-bottom: ${theme.spacing.m}px;
+  margin-left: ${theme.spacing.xs}px;
 `;
 
 const CarCard = styled(Card)``;
@@ -49,58 +61,69 @@ const CarHeader = styled(View)`
 `;
 
 const CarName = styled(Text)`
-  font-size: 18px;
-  font-weight: bold;
+  font-size: ${theme.typography.sizes.l}px;
+  font-weight: ${theme.typography.weights.bold};
   color: ${theme.colors.text};
 `;
 
 const CarCategory = styled(Text)`
-  font-size: 12px;
-  color: ${theme.colors.background};
-  background-color: ${theme.colors.success};
+  font-size: ${theme.typography.sizes.xs}px;
+  color: ${theme.colors.surface};
+  background-color: ${theme.colors.secondary};
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: ${theme.radius.s}px;
   overflow: hidden;
+  font-weight: ${theme.typography.weights.medium};
 `;
 
-const CarInfo = styled(Text)`
-  font-size: 14px;
-  color: #666666;
-  margin-bottom: 4px;
+const CarInfoRow = styled(View)`
+  flex-direction: row;
+  align-items: center;
+  margin-bottom: 6px;
+`;
+
+const CarInfoText = styled(Text)`
+  font-size: ${theme.typography.sizes.s}px;
+  color: ${theme.colors.textSecondary};
+  margin-left: 8px;
 `;
 
 const PriceRow = styled(View)`
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
-  margin-top: ${theme.spacing.s}px;
-  padding-top: ${theme.spacing.s}px;
+  margin-top: ${theme.spacing.m}px;
+  padding-top: ${theme.spacing.m}px;
   border-top-width: 1px;
-  border-top-color: #E0E0E0;
+  border-top-color: ${theme.colors.border};
 `;
 
 const PriceLabel = styled(Text)`
-  font-size: 14px;
-  color: #666666;
+  font-size: ${theme.typography.sizes.s}px;
+  color: ${theme.colors.textSecondary};
 `;
 
 const PriceValue = styled(Text)`
-  font-size: 20px;
-  font-weight: bold;
+  font-size: ${theme.typography.sizes.l}px;
+  font-weight: ${theme.typography.weights.bold};
   color: ${theme.colors.primary};
 `;
 
 const RecommendationBadge = styled(View)`
   background-color: ${theme.colors.warning};
-  padding: ${theme.spacing.s}px ${theme.spacing.m}px;
+  padding: ${theme.spacing.xs}px ${theme.spacing.m}px;
   border-radius: ${theme.radius.s}px;
   margin-bottom: ${theme.spacing.m}px;
+  align-self: flex-start;
+  flex-direction: row;
+  align-items: center;
 `;
 
 const RecommendationText = styled(Text)`
-  color: ${theme.colors.background};
-  font-weight: bold;
-  text-align: center;
+  color: #FFF;
+  font-weight: ${theme.typography.weights.bold};
+  font-size: ${theme.typography.sizes.xs}px;
+  margin-left: 6px;
 `;
 
 const mockCars = [
@@ -145,7 +168,8 @@ const mockCars = [
 
 export default function RentScreen() {
   return (
-    <Container>
+    <Container showsVerticalScrollIndicator={false}>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <Header>
         <HeaderTitle>Aluguel de Carros</HeaderTitle>
         <HeaderSubtitle>
@@ -160,7 +184,8 @@ export default function RentScreen() {
           <CarCard key={car.id}>
             {car.recommended && (
               <RecommendationBadge>
-                <RecommendationText>⭐ Recomendado para você</RecommendationText>
+                <MaterialIcons name="star" size={14} color="#FFF" />
+                <RecommendationText>Recomendado para você</RecommendationText>
               </RecommendationBadge>
             )}
 
@@ -169,9 +194,20 @@ export default function RentScreen() {
               <CarCategory>{car.category}</CarCategory>
             </CarHeader>
 
-            <CarInfo>🚗 Consumo: {car.consumption}</CarInfo>
-            <CarInfo>👥 Passageiros: {car.passengers}</CarInfo>
-            <CarInfo>⚙️ Transmissão: {car.transmission}</CarInfo>
+            <CarInfoRow>
+              <FontAwesome5 name="gas-pump" size={14} color={theme.colors.textSecondary} style={{ width: 18 }} />
+              <CarInfoText>Consumo: {car.consumption}</CarInfoText>
+            </CarInfoRow>
+
+            <CarInfoRow>
+              <FontAwesome5 name="users" size={14} color={theme.colors.textSecondary} style={{ width: 18 }} />
+              <CarInfoText>Passageiros: {car.passengers}</CarInfoText>
+            </CarInfoRow>
+
+            <CarInfoRow>
+              <MaterialIcons name="settings" size={16} color={theme.colors.textSecondary} style={{ width: 18 }} />
+              <CarInfoText>Transmissão: {car.transmission}</CarInfoText>
+            </CarInfoRow>
 
             <PriceRow>
               <PriceLabel>Diária a partir de:</PriceLabel>
@@ -185,11 +221,14 @@ export default function RentScreen() {
           </CarCard>
         ))}
 
-        <Card>
-          <Text style={{ fontSize: 14, color: '#666666', textAlign: 'center' }}>
-            💡 Dica: Carros econômicos são ideais para viagens longas em estradas
-            pavimentadas. SUVs são melhores para terrenos irregulares.
-          </Text>
+        <Card variant="flat">
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+            <MaterialIcons name="lightbulb" size={20} color={theme.colors.warning} style={{ marginRight: 8 }} />
+            <Text style={{ fontSize: 13, color: theme.colors.textSecondary, fontStyle: 'italic', flex: 1 }}>
+              Dica: Carros econômicos são ideais para viagens longas em estradas
+              pavimentadas.
+            </Text>
+          </View>
         </Card>
       </ContentContainer>
     </Container>

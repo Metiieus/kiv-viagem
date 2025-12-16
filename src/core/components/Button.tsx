@@ -1,50 +1,91 @@
 import React from 'react';
-import { TouchableOpacity, Text, ActivityIndicator } from 'react-native';
+import { TouchableOpacity, Text, ActivityIndicator, View } from 'react-native';
 import styled from 'styled-components/native';
 import { theme } from '../theme';
 
 interface ButtonProps {
   title: string;
   onPress: () => void;
-  variant?: 'primary' | 'secondary';
+  variant?: 'primary' | 'secondary' | 'outline' | 'danger';
   loading?: boolean;
   disabled?: boolean;
+  leftIcon?: React.ReactNode;
 }
 
-const StyledButton = styled(TouchableOpacity)<{ variant: string; disabled: boolean }>`
-  background-color: ${({ variant, disabled }) =>
-    disabled ? '#CCCCCC' : variant === 'primary' ? theme.colors.primary : theme.colors.success};
+const getBackgroundColor = (variant: string, disabled: boolean) => {
+  if (disabled) return theme.colors.textLight;
+  switch (variant) {
+    case 'primary': return theme.colors.primary;
+    case 'secondary': return theme.colors.secondary;
+    case 'danger': return theme.colors.error;
+    case 'outline': return 'transparent';
+    default: return theme.colors.primary;
+  }
+};
+
+const getTextColor = (variant: string, disabled: boolean) => {
+  if (variant === 'outline') return disabled ? theme.colors.textLight : theme.colors.primary;
+  return '#FFFFFF';
+};
+
+const StyledButton = styled(TouchableOpacity) <{ variant: string; disabled: boolean }>`
+  background-color: ${({ variant, disabled }) => getBackgroundColor(variant, disabled)};
   padding: ${theme.spacing.m}px;
-  border-radius: ${theme.radius.m}px;
+  border-radius: 12px;
   align-items: center;
   justify-content: center;
-  min-height: 50px;
+  min-height: 52px;
+  width: 100%;
+  flex-direction: row;
+  
+  ${({ variant, disabled }) => variant === 'outline' && `
+    border-width: 1.5px;
+    border-color: ${disabled ? theme.colors.textLight : theme.colors.primary};
+  `}
+
+  ${({ variant, disabled }) => !disabled && (variant === 'primary' || variant === 'secondary') && `
+    shadow-color: ${theme.colors.primaryDark};
+    shadow-offset: 0px 4px;
+    shadow-opacity: 0.2;
+    shadow-radius: 4px;
+    elevation: 3;
+  `}
 `;
 
-const ButtonText = styled(Text)`
-  color: ${theme.colors.background};
-  font-size: 16px;
-  font-weight: bold;
+const ButtonText = styled(Text) <{ variant: string; disabled: boolean }>`
+  color: ${({ variant, disabled }) => getTextColor(variant, disabled)};
+  font-size: ${theme.typography.sizes.m}px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  text-align: center;
 `;
 
-export default function Button({ 
-  title, 
-  onPress, 
-  variant = 'primary', 
+const IconContainer = styled(View)`
+  margin-right: 12px;
+`;
+
+export default function Button({
+  title,
+  onPress,
+  variant = 'primary',
   loading = false,
-  disabled = false 
+  disabled = false,
+  leftIcon
 }: ButtonProps) {
   return (
-    <StyledButton 
-      variant={variant} 
-      onPress={onPress} 
+    <StyledButton
+      variant={variant}
+      onPress={onPress}
       disabled={disabled || loading}
-      activeOpacity={0.7}
+      activeOpacity={0.8}
     >
       {loading ? (
-        <ActivityIndicator color={theme.colors.background} />
+        <ActivityIndicator color={variant === 'outline' ? theme.colors.primary : '#FFF'} />
       ) : (
-        <ButtonText>{title}</ButtonText>
+        <>
+          {leftIcon && <IconContainer>{leftIcon}</IconContainer>}
+          <ButtonText variant={variant} disabled={disabled}>{title}</ButtonText>
+        </>
       )}
     </StyledButton>
   );
