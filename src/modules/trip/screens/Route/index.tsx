@@ -330,11 +330,14 @@ interface PlacePrediction {
   description: string;
 }
 
-export default function RouteScreen() {
+export default function RouteScreen({ route }: any) {
   const [origin, setOrigin] = useState('');
-  const [destination, setDestination] = useState('');
+  const [destination, setDestination] = useState(route?.params?.initialDestination || '');
   const [loading, setLoading] = useState(false);
   const [routeData, setRouteData] = useState<RouteData | null>(null);
+
+  // Auto-focus logic if needed, or just pre-fill.
+  // If we wanted to auto-calculate, we'd need useEffect, but let's let user confirm origin first.
 
   // Autocomplete State
   const [originPredictions, setOriginPredictions] = useState<PlacePrediction[]>([]);
