@@ -446,10 +446,32 @@ export default function Home() {
               </ActionGrid>
             </>
           ) : (
-            // CITY MODE: Simple "Go" Button
+            // CITY MODE: Simple "Go" Button + Quick Search
             <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
+
+              {/* Quick Search */}
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => navigation.navigate(SCREENS.ROUTE, { initialDestination: '', focusDestination: true, cityMode: true })}
+                style={{
+                  backgroundColor: '#F3F4F6',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  padding: 16,
+                  borderRadius: 12,
+                  marginBottom: 16,
+                  borderWidth: 1,
+                  borderColor: '#E5E7EB'
+                }}
+              >
+                <MaterialIcons name="search" size={24} color="#6B7280" />
+                <Text style={{ marginLeft: 12, color: '#6B7280', fontSize: 16, fontWeight: '500' }}>
+                  Para onde vamos?
+                </Text>
+              </TouchableOpacity>
+
               <Text style={{ marginBottom: 15, color: theme.colors.textSecondary, textAlign: 'center' }}>
-                Dirigindo pela cidade? Ative o modo livre.
+                Ou apenas dirija livremente
               </Text>
               <TravelModeButton onPress={toggleFreeDrive}>
                 <MaterialIcons name="navigation" size={24} color="#FFF" />
@@ -457,7 +479,6 @@ export default function Home() {
               </TravelModeButton>
             </View>
           )}
-
         </BottomSheet>
       </Overlay>
     </Container>

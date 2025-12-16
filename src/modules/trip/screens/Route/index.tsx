@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, Alert, StatusBar, TouchableOpacity, Keyboard, FlatList } from 'react-native';
 import styled from 'styled-components/native';
 import MapView, { Polyline, Marker } from 'react-native-maps';
@@ -8,12 +8,15 @@ import polyline from '@mapbox/polyline';
 import { GOOGLE_API_KEY } from '@env';
 import { theme } from '../../../../core/theme';
 import { Button, Input, Card } from '../../../../core/components';
+import { estimateTolls } from '../../../../utils/tollCalculator';
+import { getRecommendedStops, RouteStop } from '../../../../utils/stopRecommender';
 import { useVehicleStore } from '../../../garage/stores/useVehicleStore';
+import { calcDistKm } from '../../../../utils/geoUtils';
 import { MaterialIcons, FontAwesome5, FontAwesome6 } from '@expo/vector-icons';
 
 const Container = styled(ScrollView)`
   flex: 1;
-  background-color: ${theme.colors.background};
+  background-color: #F9FAFB;
 `;
 
 const Header = styled(View)`
@@ -319,10 +322,17 @@ interface RouteData {
   distance: string;
   distanceValue: number; // meters
   duration: string;
+  durationValue: number; // seconds
   coordinates: Array<{ latitude: number; longitude: number }>;
   origin: { latitude: number; longitude: number };
   destination: { latitude: number; longitude: number };
-  steps: RouteStep[]; // Added for turn-by-turn
+  steps: RouteStep[];
+  // Pre-calculated costs for this specific route
+  fuelCost: number;
+  tollCost: number;
+  totalCost: number;
+  liters: number;
+  summary: string; // e.g. "via Rod. dos Bandeirantes"
 }
 
 interface PlacePrediction {
@@ -331,20 +341,66 @@ interface PlacePrediction {
 }
 
 export default function RouteScreen({ route }: any) {
-  const [origin, setOrigin] = useState('');
+  // Pre-fill State based on params
+  const { cityMode } = route?.params || {};
+
+  const [origin, setOrigin] = useState(cityMode ? 'Sua Localização' : '');
   const [destination, setDestination] = useState(route?.params?.initialDestination || '');
   const [loading, setLoading] = useState(false);
-  const [routeData, setRouteData] = useState<RouteData | null>(null);
 
-  // Auto-focus logic if needed, or just pre-fill.
-  // If we wanted to auto-calculate, we'd need useEffect, but let's let user confirm origin first.
+  // Multi-Route State
+  const [routeOptions, setRouteOptions] = useState<RouteData[]>([]);
+  const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
+
+  // Auto-focus logic
+  useEffect(() => {
+    if (route?.params?.focusDestination) {
+      setActiveField('destination');
+      // In a real scenario we might want to ref the input and call .focus(), 
+      // but setting activeField shows predictions if text exists.
+    }
+  }, [route?.params]);
 
   // Autocomplete State
   const [originPredictions, setOriginPredictions] = useState<PlacePrediction[]>([]);
   const [destPredictions, setDestPredictions] = useState<PlacePrediction[]>([]);
   const [activeField, setActiveField] = useState<'origin' | 'destination' | null>(null);
 
-  const { selectedVehicle, fuelPrice } = useVehicleStore();
+  const { selectedVehicle, fuelPrice, setFuelPrice } = useVehicleStore();
+  const [isFuelModalVisible, setIsFuelModalVisible] = useState(false);
+  const [tempFuelPrice, setTempFuelPrice] = useState(fuelPrice.toString());
+
+  // Stop Recommendations
+  const [recommendedStops, setRecommendedStops] = useState<RouteStop[]>([]);
+
+  // Financial HUD State
+  const [accumulatedDistance, setAccumulatedDistance] = useState(0); // in km
+  const [accumulatedCost, setAccumulatedCost] = useState(0); // in R$
+
+  // Geofencing State
+  const [tollLocations, setTollLocations] = useState<{ latitude: number, longitude: number, passed: boolean }[]>([]);
+  const [activeTollAlert, setActiveTollAlert] = useState<string | null>(null);
+
+  const handleUpdateFuelPrice = () => {
+    const price = parseFloat(tempFuelPrice.replace(',', '.'));
+    if (!isNaN(price) && price > 0) {
+      setFuelPrice(price);
+      // If routes allow re-calculation without fetching API again, we should do it.
+      // But currently costs are baked into routeOptions. 
+      // Ideally we should recalculate costs when price changes.
+      // For now, let's just update store and ask user to refresh or re-calculate.
+      // Better: Re-run cost calc iterate over routeOptions
+      const updatedOptions = routeOptions.map(opt => {
+        const distKm = opt.distanceValue / 1000;
+        const liters = distKm / (selectedVehicle?.avgConsumption || 10);
+        const fCost = liters * price;
+        const tCost = fCost + opt.tollCost;
+        return { ...opt, fuelCost: parseFloat(fCost.toFixed(2)), totalCost: parseFloat(tCost.toFixed(2)) };
+      });
+      setRouteOptions(updatedOptions);
+      setIsFuelModalVisible(false);
+    }
+  };
 
 
   // Debounce helper
@@ -455,7 +511,21 @@ export default function RouteScreen({ route }: any) {
   const locationSubscription = React.useRef<Location.LocationSubscription | null>(null);
 
   const calculateRoute = async () => {
-    if (!origin.trim() || !destination.trim()) {
+    let finalOrigin = origin;
+
+    // If City Mode and Origin is user location, get coords
+    if (cityMode && (origin === 'Sua Localização' || !origin)) {
+      let loc;
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') throw new Error('Permission denied');
+        loc = await Location.getCurrentPositionAsync({});
+        finalOrigin = `${loc.coords.latitude},${loc.coords.longitude}`;
+      } catch (e) {
+        Alert.alert('Erro GPS', 'Não foi possível obter sua localização.');
+        return;
+      }
+    } else if (!origin.trim() || !destination.trim()) {
       Alert.alert('Atenção', 'Por favor, preencha origem e destino');
       return;
     }
@@ -467,49 +537,94 @@ export default function RouteScreen({ route }: any) {
     }
 
     setLoading(true);
-    setRouteData(null); // Clear previous route
+    setRouteOptions([]);
 
     try {
+      // Request Alternatives!
       const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(
-        origin
-      )}&destination=${encodeURIComponent(destination)}&key=${GOOGLE_API_KEY}&language=pt-BR`;
+        finalOrigin
+      )}&destination=${encodeURIComponent(destination)}&alternatives=true&key=${GOOGLE_API_KEY}&language=pt-BR`;
 
       const response = await axios.get(url);
 
       if (response.data.status === 'OK' && response.data.routes.length > 0) {
-        const route = response.data.routes[0];
-        const leg = route.legs[0];
 
-        const points = polyline.decode(route.overview_polyline.points);
-        const coordinates = points.map((point: number[]) => ({
-          latitude: point[0],
-          longitude: point[1],
-        }));
+        const newOptions: RouteData[] = response.data.routes.map((route: any) => {
+          const leg = route.legs[0];
+          const points = polyline.decode(route.overview_polyline.points);
+          const coordinates = points.map((point: number[]) => ({
+            latitude: point[0],
+            longitude: point[1],
+          }));
 
-        const steps: RouteStep[] = leg.steps.map((step: any) => ({
-          html_instructions: step.html_instructions,
-          distance: step.distance,
-          duration: step.duration,
-          start_location: step.start_location,
-          end_location: step.end_location,
-          maneuver: step.maneuver
-        }));
+          const steps: RouteStep[] = leg.steps.map((step: any) => ({
+            html_instructions: step.html_instructions,
+            distance: step.distance,
+            duration: step.duration,
+            start_location: step.start_location,
+            end_location: step.end_location,
+            maneuver: step.maneuver
+          }));
 
-        setRouteData({
-          distance: leg.distance.text,
-          distanceValue: leg.distance.value,
-          duration: leg.duration.text,
-          coordinates,
-          origin: {
-            latitude: leg.start_location.lat,
-            longitude: leg.start_location.lng,
-          },
-          destination: {
-            latitude: leg.end_location.lat,
-            longitude: leg.end_location.lng,
-          },
-          steps
+          // Cost Calculations
+          const distanceKm = leg.distance.value / 1000;
+          const avgConsumption = selectedVehicle?.avgConsumption || 10; // Default fallback
+          const liters = distanceKm / avgConsumption;
+          const fuelCost = liters * (fuelPrice || 5.50);
+          const tollCost = estimateTolls(leg.distance.value); // Use utility
+          const totalCost = fuelCost + tollCost;
+
+          return {
+            distance: leg.distance.text,
+            distanceValue: leg.distance.value,
+            duration: leg.duration.text,
+            durationValue: leg.duration.value,
+            coordinates,
+            origin: {
+              latitude: leg.start_location.lat,
+              longitude: leg.start_location.lng,
+            },
+            destination: {
+              latitude: leg.end_location.lat,
+              longitude: leg.end_location.lng,
+            },
+            steps,
+            fuelCost: parseFloat(fuelCost.toFixed(2)),
+            tollCost: parseFloat(tollCost.toFixed(2)),
+            totalCost: parseFloat(totalCost.toFixed(2)),
+            liters: parseFloat(liters.toFixed(1)),
+            summary: route.summary || leg.start_address // Google often gives summary
+          };
         });
+
+        setRouteOptions(newOptions);
+        setSelectedRouteIndex(0);
+
+        // Calculate Recommended Stops based on first route (or selected)
+        // Assuming user selects first route initially.
+        if (newOptions.length > 0 && selectedVehicle) {
+          // Estimate range if not explicitly defined in vehicle interface
+          const estimatedRange = selectedVehicle.avgConsumption * 50;
+
+          // We need to pass the full coordinate path for analysis
+          const routeCoordinates = newOptions[0].coordinates;
+
+          // This is now async
+          getRecommendedStops(
+            routeCoordinates,
+            newOptions[0].distanceValue / 1000,
+            {
+              rangeKm: estimatedRange,
+              avgConsumption: selectedVehicle.avgConsumption,
+              currentFuel: 30 // Mocking 30L start
+            }
+          ).then(stops => {
+            setRecommendedStops(stops);
+          }).catch(err => {
+            console.error("Error calculating stops", err);
+          });
+        }
+
       } else {
         Alert.alert('Erro', 'Rota não encontrada. Tente endereços mais específicos.');
       }
@@ -523,59 +638,52 @@ export default function RouteScreen({ route }: any) {
   };
 
   const mockRoute = () => {
-    setRouteData({
+    // Mocking 2 routes for testing UI
+    const mock1: RouteData = {
       distance: '408 km',
       distanceValue: 408000,
       duration: '5 horas 20 min',
+      durationValue: 19200,
       coordinates: [
-        { latitude: -23.5505, longitude: -46.6333 }, // SP
-        { latitude: -25.4284, longitude: -49.2733 }  // Curitiba
+        { latitude: -23.5505, longitude: -46.6333 },
+        { latitude: -25.4284, longitude: -49.2733 }
       ],
       origin: { latitude: -23.5505, longitude: -46.6333 },
       destination: { latitude: -25.4284, longitude: -49.2733 },
-      steps: [
-        {
-          html_instructions: "Siga em frente na <b>Rodovia dos Bandeirantes</b>",
-          distance: { text: "20 km", value: 20000 },
-          duration: { text: "20 min", value: 1200 },
-          start_location: { lat: -23.5505, lng: -46.6333 },
-          end_location: { lat: -23.6, lng: -46.7 }
-        },
-        {
-          html_instructions: "Pegue a saída para <b>Curitiba</b>",
-          distance: { text: "380 km", value: 380000 },
-          duration: { text: "5 h", value: 18000 },
-          start_location: { lat: -23.6, lng: -46.7 },
-          end_location: { lat: -25.4284, lng: -49.2733 }
-        }
-      ]
-    });
+      steps: [],
+      fuelCost: 200.50,
+      tollCost: 50.00,
+      totalCost: 250.50,
+      liters: 40,
+      summary: "via Rod. Régis Bittencourt"
+    };
+
+    const mock2: RouteData = {
+      distance: '450 km',
+      distanceValue: 450000,
+      duration: '6 horas',
+      durationValue: 21600,
+      coordinates: [
+        { latitude: -23.5505, longitude: -46.6333 },
+        { latitude: -24.0, longitude: -47.0 },
+        { latitude: -25.4284, longitude: -49.2733 }
+      ],
+      origin: { latitude: -23.5505, longitude: -46.6333 },
+      destination: { latitude: -25.4284, longitude: -49.2733 },
+      steps: [],
+      fuelCost: 220.00,
+      tollCost: 40.00,
+      totalCost: 260.00,
+      liters: 44,
+      summary: "via Rota Alternativa"
+    };
+
+    setRouteOptions([mock1, mock2]);
     setLoading(false);
   }
 
-  const getTripDetails = () => {
-    if (!routeData || !selectedVehicle) return null;
-
-    const distanceKm = routeData.distanceValue / 1000;
-    const litersNeeded = distanceKm / selectedVehicle.avgConsumption;
-    const fuelCost = litersNeeded * fuelPrice;
-
-    // Simulating Tolls (approx R$ 14,00 per 100km for demo)
-    const tollCount = Math.floor(distanceKm / 100);
-    const tollCost = tollCount * 14.50;
-
-    const totalCost = fuelCost + tollCost;
-
-    return {
-      liters: litersNeeded.toFixed(1),
-      fuelCost: fuelCost.toFixed(2),
-      tollCount,
-      tollCost: tollCost.toFixed(2),
-      totalCost: totalCost.toFixed(2)
-    };
-  };
-
-  const tripDetails = getTripDetails();
+  // Helper for UI
+  const routeData = routeOptions[selectedRouteIndex];
 
   const startNavigation = async () => {
     if (!routeData) return;
@@ -587,13 +695,29 @@ export default function RouteScreen({ route }: any) {
       return;
     }
 
+    // Extract Toll Locations from steps
+    const tolls: { latitude: number, longitude: number, passed: boolean }[] = [];
+    if (routeData.steps) {
+      routeData.steps.forEach((step: any) => {
+        if (step.html_instructions.toLowerCase().includes('pedágio') ||
+          step.html_instructions.toLowerCase().includes('toll')) {
+          tolls.push({
+            latitude: step.end_location.lat,
+            longitude: step.end_location.lng,
+            passed: false
+          });
+        }
+      });
+    }
+    setTollLocations(tolls);
+
     setIsNavigating(true);
     setCurrentStepIndex(0);
+    setAccumulatedDistance(0);
+    setAccumulatedCost(0);
 
-    // Initial Camera Animation
     mapRef.current?.animateCamera({
       center: routeData.origin,
-      pitch: 50,
       heading: 0,
       altitude: 1000,
       zoom: 18,
@@ -604,22 +728,47 @@ export default function RouteScreen({ route }: any) {
       {
         accuracy: Location.Accuracy.BestForNavigation,
         timeInterval: 1000,
-        distanceInterval: 10, // Update every 10 meters
+        distanceInterval: 5, // Update every 5 meters
       },
       (location) => {
         const { latitude, longitude, heading, speed } = location.coords;
-        setUserLocation({ latitude, longitude });
+
+        // Calculate Delta Distance for Financial HUD
+        setUserLocation(prevLoc => {
+          const newLocation = { latitude, longitude };
+          if (prevLoc) {
+            const delta = calcDistKm(prevLoc.latitude, prevLoc.longitude, latitude, longitude);
+            // Filter GPS noise: only add if moderate movement (e.g. > 2 meters which is 0.002km, adjust as needed)
+            // Actually 5 meters interval in watchPosition helps, but let's be sure.
+            if (delta > 0.002) { // delta is in km
+              setAccumulatedDistance(prev => {
+                const newDist = prev + delta;
+
+                // Update Cost
+                if (selectedVehicle) {
+                  const litersUsed = newDist / selectedVehicle.avgConsumption;
+                  setAccumulatedCost(litersUsed * (fuelPrice || 5.50)); // Use fallback for fuelPrice
+                }
+
+                return newDist;
+              });
+            }
+          }
+          return newLocation;
+        });
+
         setUserHeading(heading || 0);
-        setUserSpeed(speed ? Math.round(speed * 3.6) : 0); // convert m/s to km/h
+        setUserSpeed(speed ? Math.round(speed * 3.6) : 0); // m/s to km/h
 
         // Camera Follow
         mapRef.current?.animateCamera({
           center: { latitude, longitude },
           heading: heading || 0,
           pitch: 50,
-          zoom: 18
+          zoom: 18,
         }, { duration: 500 });
 
+        // Step Check logic
         // Find Nearest Step / Update Instruction
         // Simple logic: if close to end_location of current step, advance.
         // In a real app, use turf.js or geometry library for point-on-line distance.
@@ -722,6 +871,15 @@ export default function RouteScreen({ route }: any) {
         </MapView>
 
         <NavigationContainer pointerEvents="box-none">
+          {activeTollAlert && (
+            <View style={{ position: 'absolute', top: 100, alignSelf: 'center', backgroundColor: '#EF4444', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 30, zIndex: 999, elevation: 5 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <FontAwesome5 name="road" size={20} color="white" style={{ marginRight: 10 }} />
+                <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>{activeTollAlert}</Text>
+              </View>
+            </View>
+          )}
+
           <NavHeader>
             <TurnIcon>
               <MaterialIcons
@@ -737,17 +895,26 @@ export default function RouteScreen({ route }: any) {
           </NavHeader>
 
           <NavFooter>
-            <InfoContainer>
-              <TimeRemaining>{formatDuration(remainingDurationValue)}</TimeRemaining>
-              <DistanceRemaining>{(remainingDistanceValue / 1000).toFixed(1)} km</DistanceRemaining>
-            </InfoContainer>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingHorizontal: 10 }}>
+              <InfoContainer>
+                <TimeRemaining>{formatDuration(remainingDurationValue)}</TimeRemaining>
+                <DistanceRemaining>{(remainingDistanceValue / 1000).toFixed(1)} km</DistanceRemaining>
+              </InfoContainer>
 
-            <SpeedContainer>
-              <SpeedText>{userSpeed}</SpeedText>
-              <SpeedLabel>km/h</SpeedLabel>
-            </SpeedContainer>
+              {/* Financial HUD Widget */}
+              <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: theme.colors.success }}>
+                <Text style={{ color: theme.colors.success, fontSize: 10, fontWeight: 'bold', textTransform: 'uppercase' }}>Gasto Atual</Text>
+                <Text style={{ color: '#FFF', fontSize: 18, fontWeight: '900' }}>R$ {accumulatedCost.toFixed(2)}</Text>
+                <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10 }}>{accumulatedDistance.toFixed(1)} km rodados</Text>
+              </View>
 
-            <StopButton onPress={stopNavigation}>
+              <SpeedContainer>
+                <SpeedText>{userSpeed}</SpeedText>
+                <SpeedLabel>km/h</SpeedLabel>
+              </SpeedContainer>
+            </View>
+
+            <StopButton onPress={stopNavigation} style={{ position: 'absolute', bottom: -70, alignSelf: 'center' }}>
               <MaterialIcons name="close" size={30} color="white" />
             </StopButton>
           </NavFooter>
@@ -764,175 +931,321 @@ export default function RouteScreen({ route }: any) {
         <HeaderSubtitle>{origin && destination ? `${origin.split(',')[0]} ➔ ${destination.split(',')[0]}` : 'Defina seu trajeto'}</HeaderSubtitle>
       </Header>
 
-      <ContentContainer>
-        <Card style={{ zIndex: 100 }}>
-          <View style={{ zIndex: 201 }}>
+      <ScrollView contentContainerStyle={{ padding: 20 }}>
+        <Text style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 20, color: theme.colors.text }}>
+          {cityMode ? 'Para onde vamos?' : 'Planejar Rota'}
+        </Text>
+
+        {/* Origin Input (Hidden in City Mode) */}
+        {!cityMode && (
+          <View style={{ marginBottom: 16 }}>
             <Input
               label="Origem"
-              placeholder="Digite o endereço..."
+              placeholder="De onde vamos sair?"
               value={origin}
-              onChangeText={(text) => handleInputChange(text, 'origin')}
+              onChangeText={(t) => handleInputChange(t, 'origin')}
               onFocus={() => setActiveField('origin')}
               onClear={() => clearInput('origin')}
             />
+
+            {/* Origin Predictions */}
             {activeField === 'origin' && originPredictions.length > 0 && (
-              <PredictionsContainer>
+              <ScrollablePredictions nestedScrollEnabled={true}>
                 {originPredictions.map((item) => (
                   <PredictionItem key={item.place_id} onPress={() => handleSelectPrediction(item, 'origin')}>
-                    <MaterialIcons name="location-on" size={18} color={theme.colors.textSecondary} />
-                    <PredictionText numberOfLines={1}>{item.description}</PredictionText>
+                    <MaterialIcons name="place" size={20} color="#666" style={{ marginRight: 10 }} />
+                    <PredictionText>{item.description}</PredictionText>
                   </PredictionItem>
                 ))}
-              </PredictionsContainer>
+              </ScrollablePredictions>
             )}
-          </View>
-
-          <View style={{ height: theme.spacing.m }} />
-
-          <View style={{ zIndex: 200 }}>
-            <Input
-              label="Destino"
-              placeholder="Digite o endereço..."
-              value={destination}
-              onChangeText={(text) => handleInputChange(text, 'destination')}
-              onFocus={() => setActiveField('destination')}
-              onClear={() => clearInput('destination')}
-            />
-            {activeField === 'destination' && destPredictions.length > 0 && (
-              <PredictionsContainer>
-                {destPredictions.map((item) => (
-                  <PredictionItem key={item.place_id} onPress={() => handleSelectPrediction(item, 'destination')}>
-                    <MaterialIcons name="flag" size={18} color={theme.colors.textSecondary} />
-                    <PredictionText numberOfLines={1}>{item.description}</PredictionText>
-                  </PredictionItem>
-                ))}
-              </PredictionsContainer>
-            )}
-          </View>
-
-          <View style={{ height: theme.spacing.l }} />
-          <Button
-            title={loading ? "Calculando..." : "Planejar Viagem"}
-            onPress={calculateRoute}
-            loading={loading}
-          />
-        </Card>
-
-        {routeData && tripDetails ? (
-          <View style={{ marginTop: 24, paddingBottom: 40, zIndex: 1 }}>
-
-            <SectionTitle>Mapa do Trajeto</SectionTitle>
-            <MapContainer>
-              <MapView
-                style={{ flex: 1 }}
-                scrollEnabled={false} // Disable interaction to keep it as a preview
-                initialRegion={{
-                  latitude: routeData.origin.latitude,
-                  longitude: routeData.origin.longitude,
-                  latitudeDelta: 4,
-                  longitudeDelta: 4,
-                }}
-                region={{
-                  latitude: routeData.origin.latitude,
-                  longitude: routeData.origin.longitude,
-                  latitudeDelta: 4,
-                  longitudeDelta: 4,
-                }}
-              >
-                <Marker coordinate={routeData.origin} pinColor={theme.colors.success} />
-                <Marker coordinate={routeData.destination} pinColor={theme.colors.warning} />
-                <Polyline coordinates={routeData.coordinates} strokeWidth={4} strokeColor={theme.colors.primary} />
-              </MapView>
-            </MapContainer>
-
-            <View style={{ marginBottom: 20 }}>
-              <Button
-                title="Iniciar Navegação (Simulação)"
-                onPress={startNavigation}
-              />
-            </View>
-
-            <SectionTitle>Raio-X da Viagem</SectionTitle>
-
-            {/* Alert Card */}
-            <AlertBox>
-              <Row>
-                <AlertTitle>Atenção na Rodovia</AlertTitle>
-                <FontAwesome5 name="exclamation-triangle" color="#991B1B" />
-              </Row>
-              <AlertText>Trecho com possibilidade de chuvas isoladas. Mantenha distância segura.</AlertText>
-            </AlertBox>
-
-            {/* Financial Dashboard */}
-            <DashboardCard>
-              <Row>
-                <View>
-                  <Text style={{ color: theme.colors.textSecondary, marginBottom: 4 }}>Custo Total Estimado</Text>
-                  <MoneyValue>R$ {tripDetails.totalCost}</MoneyValue>
-                </View>
-                <FontAwesome6 name="money-bill-wave" size={24} color={theme.colors.success} />
-              </Row>
-
-              <View style={{ height: 1, backgroundColor: theme.colors.border, marginVertical: 12 }} />
-
-              <StatGrid>
-                <StatItem>
-                  <StatLabel>Combustível ({selectedVehicle?.name})</StatLabel>
-                  <StatValue>R$ {tripDetails.fuelCost}</StatValue>
-                  <Text style={{ fontSize: 10, color: '#999' }}>{tripDetails.liters} Litros</Text>
-                </StatItem>
-                <StatItem>
-                  <StatLabel>Pedágios Estimados</StatLabel>
-                  <StatValue>R$ {tripDetails.tollCost}</StatValue>
-                  <Text style={{ fontSize: 10, color: '#999' }}>{tripDetails.tollCount} Praças</Text>
-                </StatItem>
-                <StatItem>
-                  <StatLabel>Distância</StatLabel>
-                  <StatValue>{routeData.distance}</StatValue>
-                </StatItem>
-                <StatItem>
-                  <StatLabel>Tempo</StatLabel>
-                  <StatValue>{routeData.duration}</StatValue>
-                </StatItem>
-              </StatGrid>
-            </DashboardCard>
-
-            {/* Strategic Points */}
-            <SectionTitle>Paradas Estratégicas</SectionTitle>
-            <PoiScroll horizontal showsHorizontalScrollIndicator={false}>
-              <PoiCard>
-                <MaterialIcons name="local-gas-station" size={24} color={theme.colors.primary} />
-                <Text style={{ fontWeight: 'bold', marginTop: 8 }}>Posto Graal</Text>
-                <Text style={{ fontSize: 10, color: '#666' }}>km 120 (Seguro)</Text>
-              </PoiCard>
-              <PoiCard>
-                <MaterialIcons name="restaurant" size={24} color="#F59E0B" />
-                <Text style={{ fontWeight: 'bold', marginTop: 8 }}>Madero Center</Text>
-                <Text style={{ fontSize: 10, color: '#666' }}>km 245 (Almoço)</Text>
-              </PoiCard>
-              <PoiCard>
-                <MaterialIcons name="local-hospital" size={24} color="#EF4444" />
-                <Text style={{ fontWeight: 'bold', marginTop: 8 }}>Emergência</Text>
-                <Text style={{ fontSize: 10, color: '#666' }}>Base da CCR</Text>
-              </PoiCard>
-              <PoiCard>
-                <MaterialIcons name="wc" size={24} color={theme.colors.text} />
-                <Text style={{ fontWeight: 'bold', marginTop: 8 }}>Parada Leve</Text>
-                <Text style={{ fontSize: 10, color: '#666' }}>km 300</Text>
-              </PoiCard>
-            </PoiScroll>
-
-          </View>
-        ) : (
-          <View style={{ marginTop: 40, alignItems: 'center', opacity: 0.5 }}>
-            <FontAwesome5 name="map-marked-alt" size={60} color={theme.colors.textSecondary} />
-            <Text style={{ marginTop: 16, color: theme.colors.textSecondary }}>
-              Digite origem e destino para ver o planejamento completo.
-            </Text>
           </View>
         )}
 
-      </ContentContainer>
-    </Container>
+        <View style={{ marginBottom: 24, zIndex: 1 }}>
+          <Input
+            label="Destino"
+            placeholder="Para onde vamos?"
+            value={destination}
+            onChangeText={(t) => handleInputChange(t, 'destination')}
+            onFocus={() => setActiveField('destination')}
+            onClear={() => clearInput('destination')}
+          />
+
+          {/* Destination Predictions */}
+          {activeField === 'destination' && destPredictions.length > 0 && (
+            <ScrollablePredictions nestedScrollEnabled={true}>
+              {destPredictions.map((item) => (
+                <PredictionItem key={item.place_id} onPress={() => handleSelectPrediction(item, 'destination')}>
+                  <MaterialIcons name="place" size={20} color="#666" style={{ marginRight: 10 }} />
+                  <PredictionText>{item.description}</PredictionText>
+                </PredictionItem>
+              ))}
+            </ScrollablePredictions>
+          )}
+        </View>
+
+        <Button title={loading ? "Calculando..." : "Ver Rota"} onPress={calculateRoute} disabled={loading} />
+
+        {routeOptions.length > 0 && (
+          <View style={{ marginTop: 24 }}>
+            <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>
+              {routeOptions.length > 1 ? 'Rotas Encontradas' : 'Rota Encontrada'}
+            </Text>
+
+            {/* Route Carousel */}
+            {routeOptions.length > 1 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
+                {routeOptions.map((opt, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    onPress={() => setSelectedRouteIndex(index)}
+                    activeOpacity={0.9}
+                    style={{
+                      width: 140,
+                      height: 160,
+                      padding: 12,
+                      marginRight: 12,
+                      borderRadius: 12,
+                      backgroundColor: selectedRouteIndex === index ? theme.colors.primary : '#FFF',
+                      borderWidth: 1,
+                      borderColor: selectedRouteIndex === index ? theme.colors.primary : '#E5E7EB',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    <Text style={{
+                      color: selectedRouteIndex === index ? '#FFF' : '#333',
+                      fontSize: 18,
+                      fontWeight: 'bold',
+                      marginBottom: 4
+                    }}>
+                      {opt.duration}
+                    </Text>
+                    <Text style={{
+                      color: selectedRouteIndex === index ? 'rgba(255,255,255,0.8)' : '#666',
+                      fontSize: 12, marginBottom: 8
+                    }}>
+                      {opt.distance}
+                    </Text>
+                    <View style={{ height: 1, width: '100%', backgroundColor: selectedRouteIndex === index ? 'rgba(255,255,255,0.3)' : '#EEE', marginVertical: 8 }} />
+
+                    <Text style={{
+                      color: selectedRouteIndex === index ? '#FFF' : theme.colors.success,
+                      fontSize: 16,
+                      fontWeight: '900'
+                    }}>
+                      R$ {opt.totalCost.toFixed(2)}
+                    </Text>
+
+                    {/* Cost per Hour Metric */}
+                    <Text style={{
+                      fontSize: 10,
+                      color: selectedRouteIndex === index ? 'rgba(255,255,255,0.7)' : '#999',
+                      marginTop: 2
+                    }}>
+                      R$ {((opt.totalCost / opt.durationValue) * 3600).toFixed(0)}/h
+                    </Text>
+
+                    {opt.summary && (
+                      <Text numberOfLines={1} style={{ fontSize: 10, color: selectedRouteIndex === index ? '#DDD' : '#999', marginTop: 4 }}>
+                        {opt.summary}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+
+            {/* Dashboard for SELECTED Route */}
+            {routeData && (
+              <View>
+                {!cityMode && (
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
+                    <View>
+                      <Text style={{ color: '#666' }}>Distância</Text>
+                      <Text style={{ fontSize: 18, fontWeight: 'bold' }}>{routeData.distance}</Text>
+                    </View>
+                    <View>
+                      <Text style={{ color: '#666' }}>Custo/Km</Text>
+                      <Text style={{ fontSize: 18, fontWeight: 'bold' }}>
+                        R$ {(routeData.totalCost / (routeData.distanceValue / 1000)).toFixed(2)}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                <DashboardCard>
+                  <Row>
+                    <View>
+                      <Text style={{ color: theme.colors.textSecondary, marginBottom: 4 }}>Custo Total Estimado</Text>
+                      <MoneyValue>R$ {routeData.totalCost.toFixed(2)}</MoneyValue>
+                    </View>
+                    <FontAwesome6 name="money-bill-wave" size={24} color={theme.colors.success} />
+                  </Row>
+
+                  <View style={{ height: 1, backgroundColor: theme.colors.border, marginVertical: 12 }} />
+
+                  <StatGrid>
+                    <StatItem>
+                      <StatLabel>
+                        Combustível
+                        <TouchableOpacity onPress={() => setIsFuelModalVisible(true)} style={{ marginLeft: 4 }}>
+                          <FontAwesome5 name="edit" size={12} color={theme.colors.primary} />
+                        </TouchableOpacity>
+                      </StatLabel>
+                      <StatValue>R$ {routeData.fuelCost.toFixed(2)}</StatValue>
+                      <Text style={{ fontSize: 10, color: '#999' }}>{routeData.liters} Litros</Text>
+                    </StatItem>
+                    <StatItem>
+                      <StatLabel>Pedágios Estimados</StatLabel>
+                      <StatValue>R$ {routeData.tollCost.toFixed(2)}</StatValue>
+                    </StatItem>
+                    <StatItem>
+                      <StatLabel>Distância</StatLabel>
+                      <StatValue>{routeData.distance}</StatValue>
+                    </StatItem>
+                    <StatItem>
+                      <StatLabel>Tempo</StatLabel>
+                      <StatValue>{routeData.duration}</StatValue>
+                    </StatItem>
+                  </StatGrid>
+                </DashboardCard>
+
+                <View style={{ marginTop: 20 }}>
+                  <Button title="Iniciar Navegação" onPress={startNavigation} />
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Simple Fuel Price Modal */}
+        {isFuelModalVisible && (
+          <View style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', zIndex: 999
+          }}>
+            <View style={{ backgroundColor: '#FFF', padding: 20, borderRadius: 12, width: '80%' }}>
+              <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>Atualizar Preço do Combustível</Text>
+              <Input
+                placeholder="Ex: 5.59"
+                keyboardType="numeric"
+                value={tempFuelPrice}
+                onChangeText={setTempFuelPrice}
+                label="Preço por Litro (R$)"
+              />
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 }}>
+                <TouchableOpacity onPress={() => setIsFuelModalVisible(false)} style={{ marginRight: 16, padding: 10 }}>
+                  <Text style={{ color: '#666' }}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleUpdateFuelPrice} style={{ backgroundColor: theme.colors.primary, padding: 10, borderRadius: 8 }}>
+                  <Text style={{ color: '#FFF', fontWeight: 'bold' }}>Salvar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Strategic Points */}
+        <SectionTitle>Paradas Estratégicas</SectionTitle>
+        <PoiScroll horizontal showsHorizontalScrollIndicator={false}>
+          <PoiCard>
+            <MaterialIcons name="local-gas-station" size={24} color={theme.colors.primary} />
+            <Text style={{ fontWeight: 'bold', marginTop: 8 }}>Posto Graal</Text>
+            <Text style={{ fontSize: 10, color: '#666' }}>km 120 (Seguro)</Text>
+          </PoiCard>
+          <PoiCard>
+            <MaterialIcons name="restaurant" size={24} color="#F59E0B" />
+            <Text style={{ fontWeight: 'bold', marginTop: 8 }}>Madero Center</Text>
+            <Text style={{ fontSize: 10, color: '#666' }}>km 245 (Almoço)</Text>
+          </PoiCard>
+          <PoiCard>
+            <MaterialIcons name="local-hospital" size={24} color="#EF4444" />
+            <Text style={{ fontWeight: 'bold', marginTop: 8 }}>Emergência</Text>
+            <Text style={{ fontSize: 10, color: '#666' }}>Base da CCR</Text>
+          </PoiCard>
+          <PoiCard>
+            <MaterialIcons name="wc" size={24} color={theme.colors.text} />
+            <Text style={{ fontWeight: 'bold', marginTop: 8 }}>Parada Leve</Text>
+            <Text style={{ fontSize: 10, color: '#666' }}>km 300</Text>
+          </PoiCard>
+        </PoiScroll>
+
+      </ScrollView>
+
+      {routeData && !cityMode ? (
+        <View style={{ marginTop: 24, paddingBottom: 40, zIndex: 1, paddingHorizontal: 20 }}>
+
+          <SectionTitle>Mapa do Trajeto</SectionTitle>
+          <MapContainer>
+            <MapView
+              style={{ flex: 1 }}
+              scrollEnabled={false} // Disable interaction to keep it as a preview
+              initialRegion={{
+                latitude: routeData.origin.latitude,
+                longitude: routeData.origin.longitude,
+                latitudeDelta: 4,
+                longitudeDelta: 4,
+              }}
+              region={{
+                latitude: routeData.origin.latitude,
+                longitude: routeData.origin.longitude,
+                latitudeDelta: 4,
+                longitudeDelta: 4,
+              }}
+            >
+              <Marker coordinate={routeData.origin} pinColor={theme.colors.success} />
+              <Marker coordinate={routeData.destination} pinColor={theme.colors.warning} />
+              <Polyline coordinates={routeData.coordinates} strokeWidth={4} strokeColor={theme.colors.primary} />
+            </MapView>
+          </MapContainer>
+
+          {/* Alert Card */}
+          <AlertBox>
+            <Row>
+              <AlertTitle>Atenção na Rodovia</AlertTitle>
+              <FontAwesome5 name="exclamation-triangle" color="#991B1B" />
+            </Row>
+            <AlertText>Trecho com possibilidade de chuvas isoladas. Mantenha distância segura.</AlertText>
+          </AlertBox>
+
+          {/* Paradas Inteligentes */}
+          <SectionTitle>Paradas Sugeridas (IA)</SectionTitle>
+          <Text style={{ marginHorizontal: 20, marginBottom: 12, color: '#666', fontSize: 12 }}>
+            Baseado na autonomia do {selectedVehicle?.name} e duração da viagem.
+          </Text>
+
+          <PoiScroll horizontal showsHorizontalScrollIndicator={false}>
+            {recommendedStops.length > 0 ? (
+              recommendedStops.map((stop) => (
+                <PoiCard key={stop.id}>
+                  <MaterialIcons
+                    name={stop.category === 'fuel' ? 'local-gas-station' : stop.category === 'food' ? 'restaurant' : stop.category === 'hospital' ? 'local-hospital' : 'hotel'}
+                    size={24}
+                    color={stop.category === 'hospital' ? '#EF4444' : stop.category === 'fuel' ? theme.colors.primary : '#F59E0B'}
+                  />
+                  <Text style={{ fontWeight: 'bold', marginTop: 8 }} numberOfLines={1}>{stop.name}</Text>
+                  <Text style={{ fontSize: 10, color: '#666' }}>km {stop.distanceFromOriginKm} • ⭐ {stop.rating}</Text>
+                  {stop.tags.length > 0 && (
+                    <View style={{ flexDirection: 'row', marginTop: 4 }}>
+                      <Text style={{ fontSize: 9, color: theme.colors.primary, backgroundColor: '#E0E7FF', paddingHorizontal: 4, borderRadius: 4 }}>
+                        {stop.tags[0]}
+                      </Text>
+                    </View>
+                  )}
+                </PoiCard>
+              ))
+            ) : (
+              <View style={{ padding: 20 }}>
+                <Text style={{ color: '#999' }}>Nenhuma parada crítica identificada para este trajeto curto.</Text>
+              </View>
+            )}
+          </PoiScroll>
+
+        </View>
+      ) : null}
+
+    </Container >
   );
 }

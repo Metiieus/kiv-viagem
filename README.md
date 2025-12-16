@@ -1,116 +1,56 @@
-# KIViagem - A Viagem Perfeita Começa Aqui
+# Kiv Viagem 🚗💨
 
-O **KIViagem** é um assistente de viagem completo, projetado para ser o seu copiloto inteligente na estrada. Focado em planejamento, economia e segurança, o aplicativo centraliza tudo o que você precisa para uma viagem de carro perfeita.
+**Kiv Viagem** é o seu assistente inteligente para mobilidade, projetado para atender tanto suas necessidades cotidianas na cidade quanto suas grandes aventuras na estrada.
 
-> Este projeto está em desenvolvimento ativo. A estrutura inicial está pronta, e as funcionalidades estão sendo implementadas com base no roadmap de produto.
+O app possui uma "dupla personalidade" única, adaptando-se ao seu momento:
 
----
+## 🏙️ Modo Urbano (Dia a Dia)
+Ideal para a correria da cidade.
+- **Navegação Livre**: Um velocímetro e mapa 3D para acompanhar seu trajeto sem destino definido.
+- **Busca Rápida**: Digite "Para onde vamos?" e inicie a navegação imediatamente, sem burocracias.
+- **Interface Limpa**: Foco total no mapa e na condução.
 
-## 🎯 Visão do Produto
-
-O objetivo do KIViagem é ajudar o usuário a **planejar a viagem perfeita**, calculando custos, mostrando rotas, paradas úteis, clima e opções de aluguel de carro. Ele não é apenas um GPS, mas um assistente completo que guia o usuário desde o planejamento até a conclusão da viagem.
-
-**Analogia:** Google Maps + Waze + um app de economia + um app de aluguel de carros, tudo em um só lugar.
-
----
-
-## ✨ Funcionalidades Planejadas
-
-O KIViagem foi projetado para oferecer um conjunto completo de ferramentas para o viajante:
-
-| Funcionalidade | Status | Descrição |
-|---|---|---|
-| 🗺️ **Cálculo de Rota** | ⏳ Em desenvolvimento | Rota completa, distância e tempo estimado (via Google Directions API). |
-| 💰 **Custo Total da Viagem** | ⏳ Em desenvolvimento | Cálculo automático de combustível e pedágios. |
-| ⛽ **Postos e Preços** | ⏳ Em desenvolvimento | Localização de postos e preços de combustível no trajeto. |
-| 🍽️ **Restaurantes no Trajeto** | ⏳ Em desenvolvimento | Sugestão de restaurantes bem avaliados próximos à rota (via Google Places API). |
-| 🌦️ **Clima na Estrada** | ⏳ Em desenvolvimento | Previsão do tempo na origem, destino e pontos importantes da rota (via OpenWeather API). |
-| 톨 **Pedágios e Valores** | ⏳ Em desenvolvimento | Mapeamento de pedágios e cálculo do custo total. |
-| 🚗 **Sugestão de Carro Ideal** | 📅 Planejado | Recomendação do melhor carro para alugar com base na viagem. |
-| 🧭 **Modo Viagem** | 📅 Planejado | Interface de navegação ao vivo com informações em tempo real (clima, postos, alertas). |
-| 🏢 **Aluguel de Carros** | 📅 Planejado | Área dedicada para busca, comparação e sugestão de aluguel de veículos. |
+## 🛣️ Modo Viagem (Planejamento)
+Ferramentas completas para cair na estrada com segurança e controle.
+- **Planejador de Rotas**: Defina Origem e Destino com precisão (Google Places).
+- **Estimativa de Custos**: Saiba exatamente quanto vai gastar com **Combustível** e **Pedágios**.
+- **Gestão de Veículos**: Cadastre seu carro (consumo, tipo de combustível) para cálculos precisos.
+- **Navegação GPS 3D**: Hud estilo Waze com instruções passo-a-passo, tempo restante e alertas.
 
 ---
 
-## 🚀 Tecnologias Utilizadas
+## 🚀 Tecnologias
+- **React Native (Expo)**: Performance e compatibilidade Cross-platform.
+- **Google Maps Platform**:
+    - *Maps SDK*: Renderização de mapas fluidos.
+    - *Places API (New)*: Busca inteligente de endereços.
+    - *Directions API*: Traçados de rota e instruções de manobra.
+- **Expo Location**: Rastreamento GPS preciso em tempo real.
 
-- **React Native**: Framework para desenvolvimento de aplicativos móveis nativos.
-- **Expo**: Plataforma para desenvolvimento e build de aplicativos universais.
-- **TypeScript**: Superset do JavaScript que adiciona tipagem estática.
-- **React Navigation**: Solução de roteamento e navegação.
-- **Zustand**: Gerenciador de estado simples e poderoso.
-- **Styled Components**: Biblioteca para estilização de componentes com CSS-in-JS.
-- **React Native Maps**: Componente de mapa para iOS e Android.
-- **Axios**: Cliente HTTP para realizar requisições a APIs.
+## 🛠️ Como Rodar
 
----
+1.  **Instale as dependências**:
+    ```bash
+    npm install
+    # ou
+    yarn install
+    ```
 
-## 🛠️ Como Executar o Projeto
+2.  **Configuração**:
+    Crie um arquivo `.env` na raiz baseado no `.env.example` e adicione sua chave da Google Cloud:
+    ```env
+    GOOGLE_API_KEY=sua_chave_aqui
+    ```
 
-### Pré-requisitos
+3.  **Inicie o App**:
+    ```bash
+    npx expo start -c
+    ```
 
-- [Node.js](https://nodejs.org/) (versão 18 ou superior)
-- [Yarn](https://yarnpkg.com/)
-- [Expo CLI](https://docs.expo.dev/get-started/installation/)
-
-### Instalação
-
-1. **Clone o repositório:**
-   ```bash
-   git clone https://github.com/Metiieus/kiv-viagem.git
-   cd kiv-viagem
-   ```
-
-2. **Instale as dependências:**
-   ```bash
-   yarn install
-   ```
-
-### Execução
-
-Para iniciar o aplicativo em modo de desenvolvimento, execute um dos seguintes comandos:
-
-- **Iniciar o Metro Bundler:**
-  ```bash
-  yarn start
-  ```
-
-- **Abrir no Android:**
-  ```bash
-  yarn android
-  ```
-
-- **Abrir no iOS:**
-  ```bash
-  yarn ios
-  ```
-
-- **Abrir no Navegador Web:**
-  ```bash
-  yarn web
-  ```
-
-Após iniciar o Metro Bundler, escaneie o QR Code com o aplicativo **Expo Go** (disponível para [Android](https://play.google.com/store/apps/details?id=host.exp.exponent) e [iOS](https://apps.apple.com/us/app/expo-go/id982107779)) para abrir o app no seu dispositivo.
+## 📱 Funcionalidades de Destaque
+- **Toggle Inteligente**: Alterne entre "Cidade" e "Viagem" com um toque na tela inicial.
+- **Modo Livre**: Monitore sua velocidade e o trânsito mesmo sem rota traçada.
+- **Cálculo de Pedágio**: Estimativas automáticas baseadas na distância da rota.
 
 ---
-
-## 🏗️ Estrutura do Projeto
-
-O projeto segue uma arquitetura modular para garantir escalabilidade e organização:
-
-```
-kiv-viagem/
-├── src/
-│   ├── app/                # Configuração de rotas e navegação
-│   ├── core/               # Recursos compartilhados (tema, constantes, hooks)
-│   └── modules/            # Módulos de funcionalidades (trip, rent, etc.)
-├── assets/                 # Imagens, fontes e outros recursos estáticos
-├── App.tsx                 # Componente raiz
-└── package.json            # Dependências e scripts
-```
-
----
-
-## 🤝 Contribuição
-
-Este projeto está em desenvolvimento. Novas contribuições são bem-vindas. Se você tiver sugestões ou encontrar problemas, sinta-se à vontade para abrir uma *issue* ou enviar um *pull request*.
+*Desenvolvido com foco na experiência do motorista.*
