@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Image } from 'react-native';
 import styled from 'styled-components/native';
 import { useNavigation } from '@react-navigation/native';
 import { theme } from '../../../../core/theme';
@@ -15,13 +15,13 @@ const Header = styled(View)`
   padding: ${theme.spacing.l}px;
   padding-top: 60px;
   padding-bottom: 40px;
+  align-items: center;
 `;
 
-const Logo = styled(Text)`
-  font-size: 36px;
-  font-weight: bold;
-  color: ${theme.colors.background};
-  margin-bottom: ${theme.spacing.s}px;
+const LogoImage = styled(Image)`
+  width: 200px;
+  height: 180px;
+  margin-bottom: ${theme.spacing.m}px;
 `;
 
 const Tagline = styled(Text)`
@@ -124,7 +124,10 @@ export default function Home() {
   return (
     <Container>
       <Header>
-        <Logo>KIViagem</Logo>
+        <LogoImage 
+          source={require('../../../../../assets/logo.png')} 
+          resizeMode="contain"
+        />
         <Tagline>✨ A viagem perfeita começa aqui</Tagline>
       </Header>
 
