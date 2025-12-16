@@ -1,27 +1,36 @@
 import React from 'react';
-import { TextInput, TextInputProps } from 'react-native';
+import { TextInput, TextInputProps, View, Text } from 'react-native';
 import styled from 'styled-components/native';
 import { theme } from '../theme';
 
 interface InputProps extends TextInputProps {
   placeholder: string;
+  label?: string; // Adicionei suporte opcional para Label
 }
 
+const Container = styled(View)`
+  margin-bottom: 8px;
+`;
+
 const StyledInput = styled(TextInput)`
-  background-color: #F5F5F5;
-  padding: ${theme.spacing.m}px;
-  border-radius: ${theme.radius.s}px;
+  background-color: #F8F9FA; /* Fundo cinza super claro */
+  padding: 16px;
+  border-radius: 16px; /* Borda bem arredondada (estilo iOS/Modern) */
   font-size: 16px;
   color: ${theme.colors.text};
-  border: 1px solid #E0E0E0;
+  border: 1px solid transparent; /* Sem borda visível inicialmente */
+  
+  /* Se quiser adicionar foco depois, pode manipular aqui */
 `;
 
 export default function Input({ placeholder, ...props }: InputProps) {
   return (
-    <StyledInput
-      placeholder={placeholder}
-      placeholderTextColor="#999999"
-      {...props}
-    />
+    <Container>
+      <StyledInput
+        placeholder={placeholder}
+        placeholderTextColor="#A0A0A0"
+        {...props}
+      />
+    </Container>
   );
 }

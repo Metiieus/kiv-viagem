@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Image } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Image, StatusBar } from 'react-native';
 import styled from 'styled-components/native';
 import { useNavigation } from '@react-navigation/native';
 import { theme } from '../../../../core/theme';
@@ -7,51 +7,73 @@ import { SCREENS } from '../../../../core/constants/screens';
 
 const Container = styled(ScrollView)`
   flex: 1;
-  background-color: #F8F8F8;
+  background-color: #FAFAFA; /* Fundo levemente off-white */
 `;
 
+// O TRUQUE DO DESIGN MODERNO: Borda arredondada apenas embaixo
 const Header = styled(View)`
   background-color: ${theme.colors.primary};
   padding: ${theme.spacing.l}px;
   padding-top: 60px;
-  padding-bottom: 40px;
+  padding-bottom: 50px;
   align-items: center;
+  border-bottom-left-radius: 30px;
+  border-bottom-right-radius: 30px;
+  shadow-color: ${theme.colors.primary};
+  shadow-offset: 0px 10px;
+  shadow-opacity: 0.2;
+  shadow-radius: 10px;
+  elevation: 5;
 `;
 
 const LogoImage = styled(Image)`
-  width: 200px;
-  height: 180px;
-  margin-bottom: ${theme.spacing.m}px;
+  width: 160px; /* Ajustei para ficar mais elegante */
+  height: 160px;
+  margin-bottom: ${theme.spacing.s}px;
 `;
 
 const Tagline = styled(Text)`
   font-size: 16px;
   color: ${theme.colors.background};
-  opacity: 0.9;
+  opacity: 0.95;
+  font-weight: 600;
+  letter-spacing: 0.5px;
 `;
 
 const ContentContainer = styled(View)`
-  padding: ${theme.spacing.m}px;
-  margin-top: -20px;
+  padding: ${theme.spacing.l}px;
+  margin-top: -10px; /* Sobrepõe levemente para integrar */
 `;
 
 const FeatureCard = styled(TouchableOpacity)`
   background-color: ${theme.colors.background};
   padding: ${theme.spacing.l}px;
-  border-radius: ${theme.radius.m}px;
+  border-radius: 20px; /* Mais arredondado */
   margin-bottom: ${theme.spacing.m}px;
-  shadow-color: #000;
-  shadow-offset: 0px 2px;
-  shadow-opacity: 0.1;
-  shadow-radius: 4px;
-  elevation: 3;
   flex-direction: row;
   align-items: center;
+  
+  /* Sombra moderna e difusa ("Soft UI") */
+  shadow-color: #000;
+  shadow-offset: 0px 4px;
+  shadow-opacity: 0.05;
+  shadow-radius: 12px;
+  elevation: 2;
+  border: 1px solid #F0F0F0;
+`;
+
+const FeatureIconContainer = styled(View)`
+  width: 50px;
+  height: 50px;
+  background-color: #F0F9F4; /* Um verde bem clarinho de fundo no ícone */
+  border-radius: 15px;
+  align-items: center;
+  justify-content: center;
+  margin-right: ${theme.spacing.m}px;
 `;
 
 const FeatureIcon = styled(Text)`
-  font-size: 40px;
-  margin-right: ${theme.spacing.m}px;
+  font-size: 24px;
 `;
 
 const FeatureContent = styled(View)`
@@ -59,36 +81,24 @@ const FeatureContent = styled(View)`
 `;
 
 const FeatureTitle = styled(Text)`
-  font-size: 18px;
+  font-size: 17px;
   font-weight: bold;
   color: ${theme.colors.text};
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 `;
 
 const FeatureDescription = styled(Text)`
-  font-size: 14px;
-  color: #666666;
+  font-size: 13px;
+  color: #888888;
+  line-height: 18px;
 `;
 
 const SectionTitle = styled(Text)`
-  font-size: 20px;
+  font-size: 22px;
   font-weight: bold;
   color: ${theme.colors.text};
   margin-bottom: ${theme.spacing.m}px;
   margin-top: ${theme.spacing.s}px;
-`;
-
-const InfoCard = styled(View)`
-  background-color: ${theme.colors.background};
-  padding: ${theme.spacing.m}px;
-  border-radius: ${theme.radius.m}px;
-  margin-bottom: ${theme.spacing.m}px;
-`;
-
-const InfoText = styled(Text)`
-  font-size: 14px;
-  color: #666666;
-  line-height: 20px;
 `;
 
 export default function Home() {
@@ -98,41 +108,42 @@ export default function Home() {
     {
       icon: '🗺️',
       title: 'Calcular Rota',
-      description: 'Planeje sua viagem com rotas otimizadas',
+      description: 'Rotas inteligentes e visualização no mapa',
       screen: SCREENS.ROUTE,
     },
     {
       icon: '💰',
-      title: 'Calcular Custos',
-      description: 'Estime gastos com combustível e pedágios',
+      title: 'Custos da Viagem',
+      description: 'Previsão de gastos com combustível e pedágio',
       screen: SCREENS.COSTS,
     },
     {
       icon: '🚗',
-      title: 'Aluguel de Carros',
-      description: 'Encontre o carro ideal para sua viagem',
+      title: 'Alugar Veículo',
+      description: 'Escolha o carro ideal para o trajeto',
       screen: SCREENS.RENT,
     },
     {
       icon: '🧭',
       title: 'Modo Viagem',
-      description: 'Navegação em tempo real durante a viagem',
+      description: 'Assistente de navegação em tempo real',
       screen: SCREENS.TRAVEL_MODE,
     },
   ];
 
   return (
-    <Container>
+    <Container showsVerticalScrollIndicator={false}>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <Header>
         <LogoImage 
           source={require('../../../../../assets/logo.png')} 
           resizeMode="contain"
         />
-        <Tagline>✨ A viagem perfeita começa aqui</Tagline>
+        <Tagline>A viagem perfeita começa aqui</Tagline>
       </Header>
 
       <ContentContainer>
-        <SectionTitle>Funcionalidades</SectionTitle>
+        <SectionTitle>O que vamos fazer hoje?</SectionTitle>
 
         {features.map((feature, index) => (
           <FeatureCard
@@ -140,24 +151,15 @@ export default function Home() {
             onPress={() => navigation.navigate(feature.screen)}
             activeOpacity={0.7}
           >
-            <FeatureIcon>{feature.icon}</FeatureIcon>
+            <FeatureIconContainer>
+              <FeatureIcon>{feature.icon}</FeatureIcon>
+            </FeatureIconContainer>
             <FeatureContent>
               <FeatureTitle>{feature.title}</FeatureTitle>
               <FeatureDescription>{feature.description}</FeatureDescription>
             </FeatureContent>
           </FeatureCard>
         ))}
-
-        <SectionTitle>Sobre o KIViagem</SectionTitle>
-        <InfoCard>
-          <InfoText>
-            O KIViagem é seu copiloto inteligente na estrada. Planeje viagens,
-            calcule custos, encontre paradas úteis e navegue com segurança.
-            {'\n\n'}
-            Combine as melhores funcionalidades de GPS, calculadora de custos e
-            assistente de viagem em um único aplicativo.
-          </InfoText>
-        </InfoCard>
       </ContentContainer>
     </Container>
   );
