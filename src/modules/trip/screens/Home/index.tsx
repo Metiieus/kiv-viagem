@@ -1,495 +1,358 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, TouchableOpacity, StatusBar, StyleSheet, Alert, Platform, Image } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, StatusBar, ScrollView, Dimensions, Image } from 'react-native';
 import styled from 'styled-components/native';
 import { useNavigation } from '@react-navigation/native';
-import MapView, { PROVIDER_GOOGLE } from 'react-native-maps';
-import * as Location from 'expo-location';
-import { MaterialIcons, FontAwesome5, Feather } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { MaterialIcons, FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { theme } from '../../../../core/theme';
 import { SCREENS } from '../../../../core/constants/screens';
 import { useAuthStore } from '../../../auth/stores/useAuthStore';
 
-// Custom Map Style to match the App Theme (Clean & Teal)
-const mapCustomStyle = [
-  {
-    "elementType": "geometry",
-    "stylers": [{ "color": "#f5f5f5" }] // Lighter background
-  },
-  {
-    "elementType": "labels.icon",
-    "stylers": [{ "visibility": "off" }] // Hide excessive icons
-  },
-  {
-    "elementType": "labels.text.fill",
-    "stylers": [{ "color": "#616161" }]
-  },
-  {
-    "elementType": "labels.text.stroke",
-    "stylers": [{ "color": "#f5f5f5" }]
-  },
-  {
-    "featureType": "administrative.land_parcel",
-    "elementType": "labels.text.fill",
-    "stylers": [{ "color": "#bdbdbd" }]
-  },
-  {
-    "featureType": "poi",
-    "elementType": "geometry",
-    "stylers": [{ "color": "#eeeeee" }]
-  },
-  {
-    "featureType": "poi",
-    "elementType": "labels.text.fill",
-    "stylers": [{ "color": "#757575" }]
-  },
-  {
-    "featureType": "poi.park",
-    "elementType": "geometry",
-    "stylers": [{ "color": "#e5f5f5" }] // Teal tint for parks
-  },
-  {
-    "featureType": "poi.park",
-    "elementType": "labels.text.fill",
-    "stylers": [{ "color": "#9e9e9e" }]
-  },
-  {
-    "featureType": "road",
-    "elementType": "geometry",
-    "stylers": [{ "color": "#ffffff" }]
-  },
-  {
-    "featureType": "road.arterial",
-    "elementType": "labels.text.fill",
-    "stylers": [{ "color": "#757575" }]
-  },
-  {
-    "featureType": "road.highway",
-    "elementType": "geometry",
-    "stylers": [{ "color": "#dadada" }]
-  },
-  {
-    "featureType": "road.highway",
-    "elementType": "labels.text.fill",
-    "stylers": [{ "color": "#616161" }]
-  },
-  {
-    "featureType": "road.local",
-    "elementType": "labels.text.fill",
-    "stylers": [{ "color": "#9e9e9e" }]
-  },
-  {
-    "featureType": "transit.line",
-    "elementType": "geometry",
-    "stylers": [{ "color": "#e5e5e5" }]
-  },
-  {
-    "featureType": "transit.station",
-    "elementType": "geometry",
-    "stylers": [{ "color": "#eeeeee" }]
-  },
-  {
-    "featureType": "water",
-    "elementType": "geometry",
-    "stylers": [{ "color": "#c9c9c9" }]
-  },
-  {
-    "featureType": "water",
-    "elementType": "labels.text.fill",
-    "stylers": [{ "color": "#9e9e9e" }]
-  }
-];
+const { width } = Dimensions.get('window');
 
-const Container = styled(View)`
+// Styled Components
+const Container = styled(ScrollView)`
   flex: 1;
-  background-color: #F0FDFA;
+  background-color: ${theme.colors.background};
 `;
 
-const MapContainer = styled(View)`
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  justify-content: flex-end;
-  align-items: center;
+const HeaderGradient = styled(LinearGradient).attrs({
+  colors: ['#0D9488', '#14B8A6', '#2DD4BF'],
+  start: { x: 0, y: 0 },
+  end: { x: 1, y: 1 },
+})`
+  padding: 60px 24px 40px 24px;
+  border-bottom-left-radius: 32px;
+  border-bottom-right-radius: 32px;
 `;
 
-const Overlay = styled(View)`
-  flex: 1;
-  background-color: rgba(255, 255, 255, 0.1); 
-  justify-content: flex-end;
-  padding-bottom: ${theme.spacing.xl}px;
-`;
-
-// Gradient fade for bottom overlay could be added here if needed
-const BottomSheet = styled(View)`
-  background-color: rgba(255, 255, 255, 0.9); /* More opaque for contrast */
-  padding-top: 16px;
-  padding-bottom: ${theme.spacing.xl}px;
-  border-top-left-radius: 24px;
-  border-top-right-radius: 24px;
-  width: 100%;
-  
-  shadow-color: #000;
-  shadow-offset: 0px -4px;
-  shadow-opacity: 0.1;
-  shadow-radius: 10px;
-  elevation: 10;
-`;
-
-const Header = styled(View)`
-  position: absolute;
-  top: 60px;
-  left: ${theme.spacing.l}px;
-  right: ${theme.spacing.l}px;
+const HeaderTop = styled(View)`
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
-  z-index: 10;
-`;
-
-const GreetingContainer = styled(View)`
-  flex-direction: row;
-  align-items: center;
-  background-color: ${theme.colors.surface};
-  padding: 8px 16px;
-  border-radius: 12px;
-  
-  shadow-color: #000;
-  shadow-offset: 0px 2px;
-  shadow-opacity: 0.1;
-  shadow-radius: 4px;
-  elevation: 3;
-`;
-
-const GreetingText = styled(Text)`
-  font-weight: 600;
-  color: ${theme.colors.text};
-  font-size: 14px;
-  margin-left: 8px;
-`;
-
-const AvatarButton = styled(TouchableOpacity)`
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background-color: ${theme.colors.primary};
-  align-items: center;
-  justify-content: center;
-  
-  shadow-color: ${theme.colors.primary};
-  shadow-offset: 0px 4px;
-  shadow-opacity: 0.3;
-  shadow-radius: 8px;
-  elevation: 4;
-`;
-
-const ActionGrid = styled(View)`
-  flex-direction: row;
-  flex-wrap: wrap; /* Allow wrapping if screen is very narrow */
-  justify-content: space-around; /* Distribute evenly */
-  padding: 0 16px;
   margin-bottom: 24px;
 `;
 
-// Uniform, smaller bubbles
-const ActionBubble = styled(TouchableOpacity)`
-  width: 90px;
-  height: 90px;
-  background-color: ${theme.colors.surface};
-  border-radius: 20px;
-  align-items: center;
-  justify-content: center;
-  margin: 4px;
-  
-  shadow-color: #0F766E;
-  shadow-offset: 0px 2px;
-  shadow-opacity: 0.1;
-  shadow-radius: 6px;
-  elevation: 4;
-  
-  border-width: 1px;
-  border-color: rgba(0,0,0,0.05);
+const GreetingContainer = styled(View)`
+  flex: 1;
 `;
 
-const TravelModeButton = styled(TouchableOpacity)`
-  background-color: ${theme.colors.primary};
-  width: 90%;
-  align-self: center;
-  padding: 16px 20px; /* Slightly compacted */
-  border-radius: 16px;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  
-  shadow-color: ${theme.colors.primary};
-  shadow-offset: 0px 4px;
-  shadow-opacity: 0.3;
-  shadow-radius: 12px;
-  elevation: 8;
-`;
-
-const BubbleLabel = styled(Text)`
-  font-weight: 600;
-  color: ${theme.colors.text};
-  font-size: 12px;
-  text-align: center;
-  margin-top: 6px;
-`;
-
-const MainActionText = styled(Text)`
-  color: #FFF;
+const GreetingText = styled(Text)`
   font-size: 16px;
-  font-weight: 700;
-  margin-left: 10px;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
 `;
 
-const GPSButton = styled(TouchableOpacity)`
-  align-self: flex-end;
-  margin-right: ${theme.spacing.l}px;
-  margin-bottom: ${theme.spacing.m}px;
+const UserName = styled(Text)`
+  font-size: 24px;
+  color: #FFFFFF;
+  font-weight: 700;
+  margin-top: 4px;
+`;
+
+const AvatarButton = styled(TouchableOpacity)`
   width: 48px;
   height: 48px;
   border-radius: 24px;
-  background-color: ${theme.colors.surface};
+  background-color: rgba(255, 255, 255, 0.2);
   align-items: center;
   justify-content: center;
-  
-  shadow-color: #000;
-  shadow-offset: 0px 2px;
-  shadow-opacity: 0.2;
-  shadow-radius: 4px;
-  elevation: 5;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+`;
+
+const LogoContainer = styled(View)`
+  align-items: center;
+  margin-bottom: 16px;
+`;
+
+const LogoImage = styled(Image)`
+  width: 120px;
+  height: 108px;
+`;
+
+const Tagline = styled(Text)`
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.95);
+  text-align: center;
+  margin-top: 8px;
+  font-weight: 500;
+`;
+
+const ContentContainer = styled(View)`
+  padding: 24px;
+  margin-top: -20px;
+`;
+
+const SectionTitle = styled(Text)`
+  font-size: 20px;
+  font-weight: 700;
+  color: ${theme.colors.text};
+  margin-bottom: 16px;
+`;
+
+const FeaturesGrid = styled(View)`
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  margin-bottom: 32px;
+`;
+
+const FeatureCard = styled(TouchableOpacity)`
+  width: ${(width - 64) / 2}px;
+  background-color: ${theme.colors.surface};
+  padding: 20px;
+  border-radius: 20px;
+  margin-bottom: 16px;
+  align-items: center;
+  ${theme.shadows.medium};
+  border: 1px solid ${theme.colors.border};
+`;
+
+const IconContainer = styled(View)<{ bgColor: string }>`
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background-color: ${props => props.bgColor};
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+`;
+
+const FeatureTitle = styled(Text)`
+  font-size: 16px;
+  font-weight: 700;
+  color: ${theme.colors.text};
+  text-align: center;
+  margin-bottom: 4px;
+`;
+
+const FeatureDescription = styled(Text)`
+  font-size: 12px;
+  color: ${theme.colors.textSecondary};
+  text-align: center;
+  line-height: 16px;
+`;
+
+const QuickActionCard = styled(TouchableOpacity)`
+  background: linear-gradient(135deg, #0D9488 0%, #14B8A6 100%);
+  padding: 24px;
+  border-radius: 20px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  ${theme.shadows.large};
+`;
+
+const QuickActionContent = styled(View)`
+  flex: 1;
+`;
+
+const QuickActionTitle = styled(Text)`
+  font-size: 18px;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin-bottom: 4px;
+`;
+
+const QuickActionSubtitle = styled(Text)`
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.9);
+`;
+
+const QuickActionIconContainer = styled(View)`
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  background-color: rgba(255, 255, 255, 0.2);
+  align-items: center;
+  justify-content: center;
+`;
+
+const InfoCard = styled(View)`
+  background-color: ${theme.colors.surface};
+  padding: 20px;
+  border-radius: 20px;
+  margin-bottom: 24px;
+  ${theme.shadows.small};
+  border: 1px solid ${theme.colors.border};
+`;
+
+const InfoTitle = styled(Text)`
+  font-size: 16px;
+  font-weight: 700;
+  color: ${theme.colors.text};
+  margin-bottom: 12px;
+`;
+
+const InfoText = styled(Text)`
+  font-size: 14px;
+  color: ${theme.colors.textSecondary};
+  line-height: 20px;
 `;
 
 export default function Home() {
-  // Navigation & Mode State
   const navigation = useNavigation<any>();
   const { user } = useAuthStore();
-  const [location, setLocation] = useState<Location.LocationObject | null>(null);
-  const mapRef = useRef<MapView>(null);
-
-  // New Modes
-  const [isTravelMode, setIsTravelMode] = useState(false); // Default: City Mode
-  const [isFreeDrive, setIsFreeDrive] = useState(false);
-
-  // Mock Speed for Free Drive
-  const [speed, setSpeed] = useState(0);
-
-  const centerMapOnUser = async () => {
-    let currentLocation = await Location.getCurrentPositionAsync({});
-    setLocation(currentLocation);
-
-    if (mapRef.current && currentLocation) {
-      // If Free Drive, 3D perspective
-      if (isFreeDrive) {
-        mapRef.current.animateCamera({
-          center: currentLocation.coords,
-          pitch: 50,
-          heading: currentLocation.coords.heading || 0,
-          zoom: 18,
-          altitude: 500
-        }, { duration: 1000 });
-      } else {
-        // Normal View
-        mapRef.current.animateToRegion({
-          latitude: currentLocation.coords.latitude,
-          longitude: currentLocation.coords.longitude,
-          latitudeDelta: 0.015,
-          longitudeDelta: 0.0121,
-        }, 1000);
-      }
-    }
-  };
-
-  const toggleFreeDrive = () => {
-    const newState = !isFreeDrive;
-    setIsFreeDrive(newState);
-    if (newState) {
-      // Start Simulation
-      centerMapOnUser();
-      const interval = setInterval(() => {
-        setSpeed(Math.floor(Math.random() * 30) + 40); // 40-70 km/h mock
-      }, 2000);
-      return () => clearInterval(interval);
-    } else {
-      setSpeed(0);
-      // Reset Camera
-      centerMapOnUser();
-    }
-  };
+  const [greeting, setGreeting] = useState('Olá');
 
   useEffect(() => {
-    (async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permissão necessária', 'Precisamos de acesso à sua localização para mostrar o mapa.');
-        return;
-      }
-
-      centerMapOnUser();
-    })();
+    const hour = new Date().getHours();
+    if (hour < 12) setGreeting('Bom dia');
+    else if (hour < 18) setGreeting('Boa tarde');
+    else setGreeting('Boa noite');
   }, []);
 
+  const features = [
+    {
+      icon: 'map',
+      iconType: 'MaterialIcons',
+      title: 'Calcular Rota',
+      description: 'Planeje sua viagem com rotas otimizadas',
+      screen: SCREENS.ROUTE,
+      color: '#3B82F6',
+      bgColor: '#DBEAFE',
+    },
+    {
+      icon: 'attach-money',
+      iconType: 'MaterialIcons',
+      title: 'Calcular Custos',
+      description: 'Estime gastos com combustível e pedágios',
+      screen: SCREENS.COSTS,
+      color: '#F59E0B',
+      bgColor: '#FEF3C7',
+    },
+    {
+      icon: 'car-sport',
+      iconType: 'Ionicons',
+      title: 'Aluguel',
+      description: 'Encontre o carro ideal para sua viagem',
+      screen: SCREENS.RENT,
+      color: '#EF4444',
+      bgColor: '#FEE2E2',
+    },
+    {
+      icon: 'garage',
+      iconType: 'MaterialIcons',
+      title: 'Minha Garagem',
+      description: 'Gerencie seus veículos',
+      screen: SCREENS.GARAGE,
+      color: '#8B5CF6',
+      bgColor: '#EDE9FE',
+    },
+  ];
+
+  const renderIcon = (iconType: string, iconName: string, color: string) => {
+    const iconProps = { name: iconName as any, size: 28, color };
+    
+    switch (iconType) {
+      case 'MaterialIcons':
+        return <MaterialIcons {...iconProps} />;
+      case 'Ionicons':
+        return <Ionicons {...iconProps} />;
+      case 'FontAwesome5':
+        return <FontAwesome5 {...iconProps} />;
+      default:
+        return <MaterialIcons {...iconProps} />;
+    }
+  };
+
   return (
-    <Container>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
-
-      <MapContainer>
-        <MapView
-          ref={mapRef}
-          provider={PROVIDER_GOOGLE}
-          style={StyleSheet.absoluteFillObject}
-          customMapStyle={mapCustomStyle}
-          showsUserLocation={true}
-          showsMyLocationButton={false}
-          showsCompass={false}
-          initialRegion={{
-            latitude: -23.55052,
-            longitude: -46.633309,
-            latitudeDelta: 0.0922,
-            longitudeDelta: 0.0421,
-          }}
-        />
-      </MapContainer>
-
-      {/* Free Drive HUD */}
-      {isFreeDrive && (
-        <View style={{ position: 'absolute', top: 60, left: 20, right: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <View style={{ backgroundColor: theme.colors.primary, padding: 10, borderRadius: 10, elevation: 5 }}>
-            <Text style={{ color: 'white', fontWeight: 'bold' }}>Modo Livre</Text>
-            <Text style={{ color: 'white', fontSize: 10 }}>Monitorando Trânsito</Text>
-          </View>
-
-          <View style={{ alignItems: 'center', backgroundColor: 'white', width: 80, height: 80, borderRadius: 40, justifyContent: 'center', borderWidth: 4, borderColor: '#f0f0f0', elevation: 5 }}>
-            <Text style={{ fontSize: 28, fontWeight: 'bold', color: '#333' }}>{speed}</Text>
-            <Text style={{ fontSize: 10, color: '#666' }}>km/h</Text>
-          </View>
-        </View>
-      )}
-
-      {/* Main Overlay */}
-      <Overlay pointerEvents="box-none">
-
-        {/* Header with Mode Toggle */}
-        {!isFreeDrive && (
-          <Header>
+    <>
+      <StatusBar barStyle="light-content" backgroundColor="#0D9488" />
+      <Container showsVerticalScrollIndicator={false}>
+        <HeaderGradient>
+          <HeaderTop>
             <GreetingContainer>
-              <Feather name={isTravelMode ? "map" : "navigation"} size={16} color={theme.colors.primary} />
-              <GreetingText>{isTravelMode ? "Modo Viagem" : "Modo Urbano"}</GreetingText>
+              <GreetingText>{greeting} 👋</GreetingText>
+              <UserName>{user?.name || 'Viajante'}</UserName>
             </GreetingContainer>
-
-            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', padding: 4, borderRadius: 20, elevation: 3, marginLeft: 10 }}>
-              <TouchableOpacity
-                onPress={() => setIsTravelMode(false)}
-                style={{
-                  paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
-                  backgroundColor: !isTravelMode ? theme.colors.primary : 'transparent'
-                }}
-              >
-                <Text style={{ color: !isTravelMode ? 'white' : '#666', fontWeight: 'bold', fontSize: 12 }}>Cidade</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setIsTravelMode(true)}
-                style={{
-                  paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
-                  backgroundColor: isTravelMode ? theme.colors.primary : 'transparent'
-                }}
-              >
-                <Text style={{ color: isTravelMode ? 'white' : '#666', fontWeight: 'bold', fontSize: 12 }}>Viagem</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={{ flex: 1 }} />
-
-            <AvatarButton onPress={() => navigation.navigate(SCREENS.GARAGE)}>
-              {user?.photo ? (
-                <Image
-                  source={{ uri: user.photo }}
-                  style={{ width: '100%', height: '100%', borderRadius: 12 }}
-                />
-              ) : (
-                <FontAwesome5 name="car" size={20} color="#FFF" />
-              )}
+            <AvatarButton onPress={() => navigation.navigate('Profile' as never)}>
+              <MaterialIcons name="person" size={28} color="#FFFFFF" />
             </AvatarButton>
-          </Header>
-        )}
+          </HeaderTop>
 
-        {/* GPS Recenter */}
-        <GPSButton onPress={centerMapOnUser} activeOpacity={0.8}>
-          <MaterialIcons name="my-location" size={24} color={theme.colors.primary} />
-        </GPSButton>
+          <LogoContainer>
+            <LogoImage 
+              source={require('../../../../../assets/logo.png')} 
+              resizeMode="contain"
+            />
+            <Tagline>✨ A viagem perfeita começa aqui</Tagline>
+          </LogoContainer>
+        </HeaderGradient>
 
-        {/* Bottom Sheet */}
-        <BottomSheet>
-
-          {isFreeDrive ? (
-            // Free Drive Stop Button
-            <View style={{ paddingHorizontal: 20 }}>
-              <TravelModeButton onPress={toggleFreeDrive} style={{ backgroundColor: '#EF4444' }}>
-                <MaterialIcons name="stop" size={24} color="#FFF" />
-                <MainActionText>Parar Navegação</MainActionText>
-              </TravelModeButton>
-            </View>
-          ) : isTravelMode ? (
-            // TRAVEL MODE: Full Dashboard
-            <>
-              <Text style={{ marginLeft: 20, marginBottom: 10, color: theme.colors.textSecondary, fontWeight: 'bold' }}>Ferramentas de Viagem</Text>
-              <ActionGrid>
-                <ActionBubble onPress={() => navigation.navigate(SCREENS.ROUTE)}>
-                  <MaterialIcons name="explore" size={32} color={theme.colors.primary} />
-                  <BubbleLabel>Vai Viajar?</BubbleLabel>
-                </ActionBubble>
-
-                <ActionBubble onPress={() => navigation.navigate(SCREENS.COSTS)}>
-                  <MaterialIcons name="attach-money" size={28} color={theme.colors.success} />
-                  <BubbleLabel>Custos</BubbleLabel>
-                </ActionBubble>
-
-                <ActionBubble onPress={() => navigation.navigate(SCREENS.RENT)}>
-                  <FontAwesome5 name="car" size={24} color={theme.colors.warning} />
-                  <BubbleLabel>Alugar</BubbleLabel>
-                </ActionBubble>
-              </ActionGrid>
-            </>
-          ) : (
-            // CITY MODE: Simple "Go" Button + Quick Search
-            <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
-
-              {/* Quick Search */}
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={() => navigation.navigate(SCREENS.ROUTE, { initialDestination: '', focusDestination: true, cityMode: true })}
-                style={{
-                  backgroundColor: '#F3F4F6',
-                  flexDirection: 'row',
+        <ContentContainer>
+          {/* Quick Action - Modo Viagem */}
+          <LinearGradient
+            colors={['#0D9488', '#14B8A6']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={{
+              padding: 24,
+              borderRadius: 20,
+              marginBottom: 24,
+              shadowColor: '#0D9488',
+              shadowOffset: { width: 0, height: 8 },
+              shadowOpacity: 0.3,
+              shadowRadius: 16,
+              elevation: 10,
+            }}
+          >
+            <TouchableOpacity
+              onPress={() => navigation.navigate(SCREENS.TRAVEL_MODE as never)}
+              activeOpacity={0.8}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 18, fontWeight: '700', color: '#FFFFFF', marginBottom: 4 }}>
+                    Modo Viagem
+                  </Text>
+                  <Text style={{ fontSize: 14, color: 'rgba(255, 255, 255, 0.9)' }}>
+                    Navegação em tempo real durante a viagem
+                  </Text>
+                </View>
+                <View style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: 24,
+                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
                   alignItems: 'center',
-                  padding: 16,
-                  borderRadius: 12,
-                  marginBottom: 16,
-                  borderWidth: 1,
-                  borderColor: '#E5E7EB'
-                }}
-              >
-                <MaterialIcons name="search" size={24} color="#6B7280" />
-                <Text style={{ marginLeft: 12, color: '#6B7280', fontSize: 16, fontWeight: '500' }}>
-                  Para onde vamos?
-                </Text>
-              </TouchableOpacity>
+                  justifyContent: 'center',
+                }}>
+                  <MaterialIcons name="navigation" size={28} color="#FFFFFF" />
+                </View>
+              </View>
+            </TouchableOpacity>
+          </LinearGradient>
 
-              <Text style={{ marginBottom: 15, color: theme.colors.textSecondary, textAlign: 'center' }}>
-                Ou apenas dirija livremente
-              </Text>
-              <TravelModeButton onPress={toggleFreeDrive}>
-                <MaterialIcons name="navigation" size={24} color="#FFF" />
-                <MainActionText>Navegação Livre</MainActionText>
-              </TravelModeButton>
-            </View>
-          )}
-        </BottomSheet>
-      </Overlay>
-    </Container>
+          <SectionTitle>Funcionalidades</SectionTitle>
+
+          <FeaturesGrid>
+            {features.map((feature, index) => (
+              <FeatureCard
+                key={index}
+                onPress={() => navigation.navigate(feature.screen as never)}
+                activeOpacity={0.7}
+              >
+                <IconContainer bgColor={feature.bgColor}>
+                  {renderIcon(feature.iconType, feature.icon, feature.color)}
+                </IconContainer>
+                <FeatureTitle>{feature.title}</FeatureTitle>
+                <FeatureDescription>{feature.description}</FeatureDescription>
+              </FeatureCard>
+            ))}
+          </FeaturesGrid>
+
+          <SectionTitle>Sobre o KIViagem</SectionTitle>
+          <InfoCard>
+            <InfoTitle>Seu copiloto inteligente 🚗</InfoTitle>
+            <InfoText>
+              O KIViagem é seu companheiro perfeito para qualquer viagem. Planeje rotas, 
+              calcule custos, encontre paradas úteis e navegue com segurança. Tudo em um único aplicativo.
+            </InfoText>
+          </InfoCard>
+        </ContentContainer>
+      </Container>
+    </>
   );
 }
