@@ -6,6 +6,7 @@ import { useNavigation } from '@react-navigation/native';
 import { theme } from '../../../../core/theme';
 import { Card, Input, Button } from '../../../../core/components';
 import { useVehicleStore, Vehicle } from '../../stores/useVehicleStore';
+import { useAuthStore } from '../../../auth/stores/useAuthStore';
 
 const Container = styled(ScrollView)`
   flex: 1;
@@ -123,12 +124,18 @@ const CurrentDetail = styled(Text)`
   color: ${theme.colors.textSecondary};
 `;
 
+import { VehicleDetailsModal } from '../VehicleDetailsModal';
+
 export default function GarageScreen() {
   const navigation = useNavigation();
   const { selectedVehicle, selectVehicle, fuelPrice, setFuelPrice, searchVehicles } = useVehicleStore();
+  const { user } = useAuthStore();
   const [priceInput, setPriceInput] = useState(fuelPrice.toString());
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Vehicle[]>([]);
+
+  // Detail Modal State
+  const [detailVehicle, setDetailVehicle] = useState<Vehicle | null>(null);
 
   useEffect(() => {
     if (searchQuery.length > 2) {
@@ -139,14 +146,12 @@ export default function GarageScreen() {
     }
   }, [searchQuery]);
 
-  const handleSelect = (vehicle: Vehicle) => {
-    selectVehicle(vehicle);
-    setSearchQuery('');
-    Keyboard.dismiss();
-    Alert.alert('Veículo Atualizado', `Agora usando ${vehicle.name}.`);
+  const handleOpenDetail = (vehicle: Vehicle) => {
+    setDetailVehicle(vehicle);
   };
 
   const handleSavePrice = () => {
+
     const price = parseFloat(priceInput.replace(',', '.'));
     if (!isNaN(price)) {
       setFuelPrice(price);
@@ -160,7 +165,7 @@ export default function GarageScreen() {
     <Container showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <Header>
-        <HeaderTitle>Minha Garagem</HeaderTitle>
+        <HeaderTitle>{user ? `Garagem de ${user.name.split(' ')[0]}` : 'Minha Garagem'}</HeaderTitle>
         <HeaderSubtitle>
           Encontre seu veículo na nossa base de dados
         </HeaderSubtitle>
@@ -169,17 +174,19 @@ export default function GarageScreen() {
       <ContentContainer>
 
         {selectedVehicle ? (
-          <CurrentVehicleCard>
-            <CurrentTitle>Veículo Atual</CurrentTitle>
-            <MaterialIcons
-              name={selectedVehicle.type === 'moto' ? 'two-wheeler' : 'directions-car'}
-              size={48}
-              color={theme.colors.primary}
-              style={{ marginBottom: 8 }}
-            />
-            <CurrentName>{selectedVehicle.name}</CurrentName>
-            <CurrentDetail>Consumo Médio: {selectedVehicle.avgConsumption} km/L</CurrentDetail>
-          </CurrentVehicleCard>
+          <TouchableOpacity onPress={() => handleOpenDetail(selectedVehicle)}>
+            <CurrentVehicleCard>
+              <CurrentTitle>Veículo Atual (Toque para Detalhes)</CurrentTitle>
+              <MaterialIcons
+                name={selectedVehicle.type === 'moto' ? 'two-wheeler' : 'directions-car'}
+                size={48}
+                color={theme.colors.primary}
+                style={{ marginBottom: 8 }}
+              />
+              <CurrentName>{selectedVehicle.name}</CurrentName>
+              <CurrentDetail>Consumo Médio: {selectedVehicle.avgConsumption} km/L</CurrentDetail>
+            </CurrentVehicleCard>
+          </TouchableOpacity>
         ) : (
           <CurrentVehicleCard>
             <CurrentTitle>Nenhum Veículo</CurrentTitle>
@@ -202,7 +209,7 @@ export default function GarageScreen() {
                 Resultados encontrados:
               </Text>
               {searchResults.map(vehicle => (
-                <ResultItem key={vehicle.id} onPress={() => handleSelect(vehicle)}>
+                <ResultItem key={vehicle.id} onPress={() => handleOpenDetail(vehicle)}>
                   <MaterialIcons
                     name={vehicle.type === 'moto' ? 'two-wheeler' : 'directions-car'}
                     size={24}
@@ -212,7 +219,7 @@ export default function GarageScreen() {
                     <ResultName>{vehicle.name}</ResultName>
                     <ResultSpec>Consumo: {vehicle.avgConsumption} km/L</ResultSpec>
                   </ResultInfo>
-                  <MaterialIcons name="add-circle-outline" size={24} color={theme.colors.success} />
+                  <MaterialIcons name="info-outline" size={24} color={theme.colors.primary} />
                 </ResultItem>
               ))}
             </ResultList>
@@ -246,6 +253,15 @@ export default function GarageScreen() {
         </ConfigCard>
 
       </ContentContainer>
+
+      {/* Detail Modal */}
+      {detailVehicle && (
+        <VehicleDetailsModal
+          visible={!!detailVehicle}
+          vehicle={detailVehicle}
+          onClose={() => setDetailVehicle(null)}
+        />
+      )}
     </Container>
   );
 }

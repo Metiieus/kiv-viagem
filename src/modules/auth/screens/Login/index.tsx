@@ -1,11 +1,19 @@
-import React from 'react';
-import { View, Text, Image, StatusBar, Alert } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, Image, StatusBar, Alert, ActivityIndicator } from 'react-native';
 import styled from 'styled-components/native';
 import { useNavigation } from '@react-navigation/native';
 import { FontAwesome5, MaterialIcons } from '@expo/vector-icons';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
+import { makeRedirectUri } from 'expo-auth-session';
+
 import { theme } from '../../../../core/theme';
 import { Button } from '../../../../core/components';
 import { SCREENS } from '../../../../core/constants/screens';
+import { useAuthStore } from '../../stores/useAuthStore';
+
+// WebBrowser shim for Auth Session
+WebBrowser.maybeCompleteAuthSession();
 
 const Container = styled(View)`
   flex: 1;
@@ -13,7 +21,6 @@ const Container = styled(View)`
   padding: ${theme.spacing.l}px;
   justify-content: space-between;
 `;
-
 const Content = styled(View)`
   flex: 1;
   justify-content: center;
@@ -59,15 +66,65 @@ const SkipButton = styled(Text)`
 
 export default function LoginScreen() {
   const navigation = useNavigation<any>();
+  const { setUser, setLoading, isLoading, isAuthenticated } = useAuthStore();
+
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    // Client ID provided by user
+    clientId: '986813775916-nmad6b9trfmit8ead904jlqlucrpa5r9.apps.googleusercontent.com',
+    iosClientId: '986813775916-nmad6b9trfmit8ead904jlqlucrpa5r9.apps.googleusercontent.com',
+    androidClientId: '986813775916-nmad6b9trfmit8ead904jlqlucrpa5r9.apps.googleusercontent.com',
+    webClientId: '986813775916-nmad6b9trfmit8ead904jlqlucrpa5r9.apps.googleusercontent.com',
+    redirectUri: makeRedirectUri({
+      scheme: 'kiv-viagem',
+      path: 'auth',
+      useProxy: true,
+    }),
+  });
+
+  useEffect(() => {
+    if (request) {
+      console.log('🔗 SEU REDIRECT URI:', request.redirectUri);
+    }
+  }, [request]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigation.replace(SCREENS.HOME);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const { authentication } = response;
+      if (authentication?.accessToken) {
+        getUserInfo(authentication.accessToken);
+      }
+    }
+  }, [response]);
+
+  const getUserInfo = async (token: string) => {
+    setLoading(true);
+    try {
+      const resp = await fetch('https://www.googleapis.com/userinfo/v2/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const user = await resp.json();
+
+      setUser({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        photo: user.picture,
+      });
+    } catch (error) {
+      console.error('Failed to fetch user data', error);
+      Alert.alert('Erro', 'Falha ao obter dados do usuário Google.');
+      setLoading(false);
+    }
+  };
 
   const handleGoogleLogin = () => {
-    Alert.alert(
-      "Conectando...",
-      "Simulando login com Google.",
-      [
-        { text: "OK", onPress: () => navigation.replace(SCREENS.HOME) }
-      ]
-    );
+    promptAsync();
   };
 
   const handleSkip = () => {
@@ -92,9 +149,10 @@ export default function LoginScreen() {
 
         <ButtonsContainer>
           <Button
-            title="Conectar com Google"
+            title={isLoading ? "Conectando..." : "Conectar com Google"}
             onPress={handleGoogleLogin}
-            leftIcon={<FontAwesome5 name="google" size={20} color="#FFF" />}
+            disabled={!request || isLoading}
+            leftIcon={isLoading ? <ActivityIndicator color="#FFF" /> : <FontAwesome5 name="google" size={20} color="#FFF" />}
           />
 
           <Button

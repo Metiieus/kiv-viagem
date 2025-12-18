@@ -366,7 +366,7 @@ export default function RouteScreen({ route }: any) {
   const [destPredictions, setDestPredictions] = useState<PlacePrediction[]>([]);
   const [activeField, setActiveField] = useState<'origin' | 'destination' | null>(null);
 
-  const { selectedVehicle, fuelPrice, setFuelPrice } = useVehicleStore();
+  const { selectedVehicle, fuelPrice, setFuelPrice, addTripToOdometer } = useVehicleStore();
   const [isFuelModalVisible, setIsFuelModalVisible] = useState(false);
   const [tempFuelPrice, setTempFuelPrice] = useState(fuelPrice.toString());
 
@@ -788,13 +788,29 @@ export default function RouteScreen({ route }: any) {
     );
   };
 
-  const stopNavigation = () => {
+  const finishTrip = () => {
+    // 1. Update Vehicle Odometer
+    if (selectedVehicle && accumulatedDistance > 0.1) {
+      addTripToOdometer(accumulatedDistance);
+      Alert.alert(
+        'Viagem Finalizada 🏁',
+        `+${accumulatedDistance.toFixed(1)} km adicionados ao odômetro do ${selectedVehicle.name}.`
+      );
+    } else {
+      Alert.alert('Viagem Encerrada', 'Distância muito curta para registro.');
+    }
+
+    // 2. Reset State
     setIsNavigating(false);
     setUserLocation(null);
+    setAccumulatedDistance(0);
+    setAccumulatedCost(0);
+    setTollLocations([]);
+
     if (locationSubscription.current) {
       locationSubscription.current.remove();
-      locationSubscription.current = null;
     }
+    locationSubscription.current = null;
 
     // Reset Camera
     if (routeData) {
@@ -806,6 +822,7 @@ export default function RouteScreen({ route }: any) {
       }, 1000);
     }
   };
+
 
   // Cleanup on unmount
   React.useEffect(() => {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, TouchableOpacity, StatusBar, StyleSheet, Alert, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StatusBar, StyleSheet, Alert, Platform, Image } from 'react-native';
 import styled from 'styled-components/native';
 import { useNavigation } from '@react-navigation/native';
 import MapView, { PROVIDER_GOOGLE } from 'react-native-maps';
@@ -7,6 +7,7 @@ import * as Location from 'expo-location';
 import { MaterialIcons, FontAwesome5, Feather } from '@expo/vector-icons';
 import { theme } from '../../../../core/theme';
 import { SCREENS } from '../../../../core/constants/screens';
+import { useAuthStore } from '../../../auth/stores/useAuthStore';
 
 // Custom Map Style to match the App Theme (Clean & Teal)
 const mapCustomStyle = [
@@ -266,6 +267,7 @@ const GPSButton = styled(TouchableOpacity)`
 export default function Home() {
   // Navigation & Mode State
   const navigation = useNavigation<any>();
+  const { user } = useAuthStore();
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const mapRef = useRef<MapView>(null);
 
@@ -403,7 +405,14 @@ export default function Home() {
             <View style={{ flex: 1 }} />
 
             <AvatarButton onPress={() => navigation.navigate(SCREENS.GARAGE)}>
-              <FontAwesome5 name="car" size={20} color="#FFF" />
+              {user?.photo ? (
+                <Image
+                  source={{ uri: user.photo }}
+                  style={{ width: '100%', height: '100%', borderRadius: 12 }}
+                />
+              ) : (
+                <FontAwesome5 name="car" size={20} color="#FFF" />
+              )}
             </AvatarButton>
           </Header>
         )}
