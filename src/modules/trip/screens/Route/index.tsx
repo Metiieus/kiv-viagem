@@ -12,20 +12,34 @@ import { estimateTolls } from '../../../../utils/tollCalculator';
 import { getRecommendedStops, RouteStop } from '../../../../utils/stopRecommender';
 import { useVehicleStore } from '../../../garage/stores/useVehicleStore';
 import { calcDistKm } from '../../../../utils/geoUtils';
-import { useTelemetryStore } from '../../garage/stores/useTelemetryStore';
-import { obdService } from '../../garage/services/OBDService';
-import { MaterialIcons, FontAwesome5, FontAwesome6 } from '@expo/vector-icons';
+import { useTelemetryStore } from '../../../garage/stores/useTelemetryStore';
+import { obdService } from '../../../garage/services/OBDService';
+import { RiskEngine, HazardPoint } from '../../../../services/RiskEngine';
+import { safetyMonitor } from '../../services/SafetyMonitor';
+import { MaterialIcons, FontAwesome5, FontAwesome6, Ionicons } from '@expo/vector-icons';
+import { getWeather, WeatherResult } from '../../../../services/weatherService';
+import { searchPlacesAlongRoute } from '../../../../services/placesService';
+import { roadsService } from '../../../../services/roadsService';
 
 const Container = styled(ScrollView)`
   flex: 1;
   background-color: #F9FAFB;
 `;
 
+// Animation Imports
+import { LayoutAnimation, Platform, UIManager } from 'react-native';
+
+if (Platform.OS === 'android') {
+  if (UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+  }
+}
+
 const Header = styled(View)`
   background-color: ${theme.colors.primary};
   padding: ${theme.spacing.l}px;
   padding-top: 60px;
-  padding-bottom: 40px;
+  padding-bottom: 20px;
   border-bottom-left-radius: ${theme.radius.xl}px;
   border-bottom-right-radius: ${theme.radius.xl}px;
   
@@ -34,6 +48,16 @@ const Header = styled(View)`
   shadow-opacity: ${theme.shadows.medium.shadowOpacity};
   shadow-radius: ${theme.shadows.medium.shadowRadius}px;
   elevation: ${theme.shadows.medium.elevation};
+  
+  flex-direction: column;
+`;
+
+
+const HeaderRow = styled(View)`
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
 `;
 
 const HeaderTitle = styled(Text)`
@@ -335,6 +359,7 @@ interface RouteData {
   totalCost: number;
   liters: number;
   summary: string; // e.g. "via Rod. dos Bandeirantes"
+  hazards: HazardPoint[]; // New Risk Engine Data
 }
 
 interface PlacePrediction {
@@ -342,9 +367,18 @@ interface PlacePrediction {
   description: string;
 }
 
-export default function RouteScreen({ route }: any) {
+export default function RouteScreen({ route, navigation }: any) {
   // Pre-fill State based on params
   const { cityMode } = route?.params || {};
+
+  // Sprint 3: Real-Time Copilot Hooks
+  const telemetry = useTelemetryStore();
+  const [activeHazard, setActiveHazard] = useState<HazardPoint | null>(null);
+  const [isSpeeding, setIsSpeeding] = useState(false);
+
+  // Sprint 5: Context Data
+  const [weather, setWeather] = useState<WeatherResult | null>(null);
+  const [cleaningRoute, setCleaningRoute] = useState(false);
 
   const [origin, setOrigin] = useState(cityMode ? 'Sua Localização' : '');
   const [destination, setDestination] = useState(route?.params?.initialDestination || '');
@@ -358,9 +392,8 @@ export default function RouteScreen({ route }: any) {
   useEffect(() => {
     if (route?.params?.focusDestination) {
       setActiveField('destination');
-      // In a real scenario we might want to ref the input and call .focus(), 
-      // but setting activeField shows predictions if text exists.
     }
+    safetyMonitor.startTrip(); // Reset monitor on load
   }, [route?.params]);
 
   // Autocomplete State
@@ -505,12 +538,37 @@ export default function RouteScreen({ route }: any) {
 
   // Navigation State
   const [isNavigating, setIsNavigating] = useState(false);
+  const [isFollowingUser, setIsFollowingUser] = useState(true);
   const mapRef = React.useRef<MapView>(null);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [userHeading, setUserHeading] = useState(0);
   const [userSpeed, setUserSpeed] = useState(0);
   const locationSubscription = React.useRef<Location.LocationSubscription | null>(null);
+
+  // Ref for accessing state inside async callback without dependency loop
+  const isFollowingUserRef = React.useRef(true);
+
+  // Sync state with ref
+  useEffect(() => {
+    isFollowingUserRef.current = isFollowingUser;
+  }, [isFollowingUser]);
+
+  const recenterCamera = () => {
+    setIsFollowingUser(true);
+    if (userLocation) {
+      mapRef.current?.animateCamera({
+        center: userLocation,
+        heading: userHeading,
+        pitch: 50,
+        zoom: 19
+      }, { duration: 800 });
+    }
+  };
+
+  const onMapPanDrag = () => {
+    if (isFollowingUser) setIsFollowingUser(false);
+  };
 
   const calculateRoute = async () => {
     let finalOrigin = origin;
@@ -553,8 +611,15 @@ export default function RouteScreen({ route }: any) {
 
         const newOptions: RouteData[] = response.data.routes.map((route: any) => {
           const leg = route.legs[0];
-          const points = polyline.decode(route.overview_polyline.points);
-          const coordinates = points.map((point: number[]) => ({
+
+          // Use Detailed Polyline from Steps (High Fidelity) instead of Overview Polyline
+          const detailedPoints: number[][] = [];
+          leg.steps.forEach((step: any) => {
+            const stepPoints = polyline.decode(step.polyline.points);
+            detailedPoints.push(...stepPoints);
+          });
+
+          const coordinates = detailedPoints.map((point: number[]) => ({
             latitude: point[0],
             longitude: point[1],
           }));
@@ -576,6 +641,9 @@ export default function RouteScreen({ route }: any) {
           const tollCost = estimateTolls(leg.distance.value); // Use utility
           const totalCost = fuelCost + tollCost;
 
+          // RISK ENGINE ANALYSIS
+          const hazards = RiskEngine.analyzeRoute(coordinates, selectedVehicle);
+
           return {
             distance: leg.distance.text,
             distanceValue: leg.distance.value,
@@ -595,7 +663,8 @@ export default function RouteScreen({ route }: any) {
             tollCost: parseFloat(tollCost.toFixed(2)),
             totalCost: parseFloat(totalCost.toFixed(2)),
             liters: parseFloat(liters.toFixed(1)),
-            summary: route.summary || leg.start_address // Google often gives summary
+            summary: route.summary || leg.start_address,
+            hazards
           };
         });
 
@@ -604,27 +673,55 @@ export default function RouteScreen({ route }: any) {
 
         // Calculate Recommended Stops based on first route (or selected)
         // Assuming user selects first route initially.
-        if (newOptions.length > 0 && selectedVehicle) {
-          // Estimate range if not explicitly defined in vehicle interface
-          const estimatedRange = selectedVehicle.avgConsumption * 50;
+        if (newOptions.length > 0) {
+          // --- SPRINT 5: Context & Intelligence ---
 
-          // We need to pass the full coordinate path for analysis
-          const routeCoordinates = newOptions[0].coordinates;
+          // 1. Weather at Destination
+          getWeather(newOptions[0].destination.latitude, newOptions[0].destination.longitude)
+            .then(w => setWeather(w))
+            .catch(e => console.error('Weather error:', e));
 
-          // This is now async
-          getRecommendedStops(
-            routeCoordinates,
-            newOptions[0].distanceValue / 1000,
-            {
-              rangeKm: estimatedRange,
-              avgConsumption: selectedVehicle.avgConsumption,
-              currentFuel: 30 // Mocking 30L start
-            }
-          ).then(stops => {
-            setRecommendedStops(stops);
-          }).catch(err => {
-            console.error("Error calculating stops", err);
-          });
+          // 2. Smart Stops along Route (Places API)
+          if (selectedVehicle) {
+            const estimatedRange = selectedVehicle.avgConsumption * 50;
+            const routeCoordinates = newOptions[0].coordinates;
+
+            // Use the new service "searchPlacesAlongRoute"
+            // Searching for Gas Stations and Restaurants
+            Promise.all([
+              searchPlacesAlongRoute(routeCoordinates, 'gas_station'),
+              searchPlacesAlongRoute(routeCoordinates, 'restaurant')
+            ]).then(([gasStations, restaurants]) => {
+              // Map to RouteStop interface
+              const stops: RouteStop[] = [
+                ...gasStations.map(p => ({
+                  id: p.place_id,
+                  name: p.name,
+                  latitude: p.geometry.location.lat,
+                  longitude: p.geometry.location.lng,
+                  coordinate: { latitude: p.geometry.location.lat, longitude: p.geometry.location.lng },
+                  type: 'gas_station',
+                  category: 'fuel' as const,
+                  rating: p.rating || 0,
+                  tags: ['Posto'],
+                  distanceFromOriginKm: 0 // Simplification for now
+                })),
+                ...restaurants.map(p => ({
+                  id: p.place_id,
+                  name: p.name,
+                  latitude: p.geometry.location.lat,
+                  longitude: p.geometry.location.lng,
+                  coordinate: { latitude: p.geometry.location.lat, longitude: p.geometry.location.lng },
+                  type: 'restaurant',
+                  category: 'food' as const,
+                  rating: p.rating || 0,
+                  tags: ['Restaurante'],
+                  distanceFromOriginKm: 0
+                }))
+              ];
+              setRecommendedStops(stops.slice(0, 10)); // Limit to 10
+            });
+          }
         }
 
       } else {
@@ -657,7 +754,8 @@ export default function RouteScreen({ route }: any) {
       tollCost: 50.00,
       totalCost: 250.50,
       liters: 40,
-      summary: "via Rod. Régis Bittencourt"
+      summary: "via Rod. Régis Bittencourt",
+      hazards: []
     };
 
     const mock2: RouteData = {
@@ -714,15 +812,16 @@ export default function RouteScreen({ route }: any) {
     setTollLocations(tolls);
 
     setIsNavigating(true);
+    setIsFollowingUser(true);
     setCurrentStepIndex(0);
     setAccumulatedDistance(0);
     setAccumulatedCost(0);
 
     mapRef.current?.animateCamera({
       center: routeData.origin,
-      heading: 0,
-      altitude: 1000,
-      zoom: 18,
+      heading: userHeading || 0,
+      pitch: 50, // 3D Perspective
+      zoom: 19, // Closer zoom for "Drive Mode"
     }, { duration: 2000 });
 
     // Start Watching Location
@@ -732,14 +831,42 @@ export default function RouteScreen({ route }: any) {
         timeInterval: 1000,
         distanceInterval: 5, // Update every 5 meters
       },
-      (location) => {
+      (async (location) => {
         const { latitude, longitude, heading, speed } = location.coords;
+        let finalLat = latitude;
+        let finalLng = longitude;
+
+        // --- SPRINT 5 EXTENSION: GOOGLE ROADS API PRECISION ---
+        // Attempt to snap to road (Optimistic UI: update immediately, correct later if massive diff)
+        // Rate Limit Check: Only call every ~5 seconds or significant distance could be better, 
+        // but for demo we just call it (be mindful of quota!).
+        // In Prod: Throttle this.
+        if (speed && speed > 5) { // Only correct if moving reasonably fast (> 18km/h) to avoid jitter at stop
+          try {
+            // 1. Roads API (Snap + Speed)
+            const snapped = await roadsService.getNearestRoad(latitude, longitude);
+            if (snapped) {
+              finalLat = snapped.location.latitude;
+              finalLng = snapped.location.longitude;
+
+              const limit = await roadsService.getSpeedLimit(snapped.placeId);
+              if (limit) setCurrentSpeedLimit(limit);
+            }
+
+            // 2. Weather Alert Check (Only every ~5 minutes or significant distance to save calls)
+            // For demo/prototype, we'll randomize or just check periodically.
+            // Simplified: Check if we have a mock alert active?
+            // Logic: A dedicated Weather Warning System would run in background.
+          } catch (err) {
+            // Ignore
+          }
+        }
 
         // Calculate Delta Distance for Financial HUD
         setUserLocation(prevLoc => {
-          const newLocation = { latitude, longitude };
+          const newLocation = { latitude: finalLat, longitude: finalLng };
           if (prevLoc) {
-            const delta = calcDistKm(prevLoc.latitude, prevLoc.longitude, latitude, longitude);
+            const delta = calcDistKm(prevLoc.latitude, prevLoc.longitude, finalLat, finalLng);
             // Filter GPS noise: only add if moderate movement (e.g. > 2 meters which is 0.002km, adjust as needed)
             // Actually 5 meters interval in watchPosition helps, but let's be sure.
             if (delta > 0.002) { // delta is in km
@@ -760,15 +887,45 @@ export default function RouteScreen({ route }: any) {
         });
 
         setUserHeading(heading || 0);
-        setUserSpeed(speed ? Math.round(speed * 3.6) : 0); // m/s to km/h
+        const currentSpeedKmH = speed ? Math.round(speed * 3.6) : 0;
+        setUserSpeed(currentSpeedKmH);
 
-        // Camera Follow
-        mapRef.current?.animateCamera({
-          center: { latitude, longitude },
-          heading: heading || 0,
-          pitch: 50,
-          zoom: 18,
-        }, { duration: 500 });
+        // --- SPRINT 5: Visual Speed Alert ---
+        // Use Real Limit if available, else Hazard Limit, else Default 110
+        const limitToCheck = currentSpeedLimit || activeHazard?.recommendedSpeed || 110;
+        if (currentSpeedKmH > limitToCheck) {
+          setIsSpeeding(true);
+        } else {
+          setIsSpeeding(false);
+        }
+
+        // Camera Follow (Optimized)
+        if (isFollowingUserRef.current) {
+          mapRef.current?.animateCamera({
+            center: { latitude, longitude },
+            heading: heading || userHeading,
+            pitch: 50,
+            zoom: 19,
+          }, { duration: 1000 }); // Smoother duration
+        }
+
+        // Sprint 3: Real-Time Copilot (Hazard Detection)
+        if (routeData.hazards) {
+          const nearestHazard = routeData.hazards.find(h => {
+            const dist = calcDistKm(latitude, longitude, h.latitude, h.longitude);
+            return dist < 0.5 && dist > 0.05; // 500m horizon, ignore if passed (approx) - logic can be refined
+          });
+
+          if (nearestHazard) {
+            // Check Physics Constraints
+            // e.g. If hazard is "Sharp Turn" and Speed < 30km/h, maybe don't annoy user?
+            // For MVP, just warn.
+            setActiveHazard(nearestHazard);
+            // Vibration.vibrate(); // Need to import Vibration
+          } else {
+            setActiveHazard(null);
+          }
+        }
 
         // Step Check logic
         // Find Nearest Step / Update Instruction
@@ -787,16 +944,19 @@ export default function RouteScreen({ route }: any) {
           }
         }
       }
-    );
+      );
   };
 
   const finishTrip = () => {
     // 1. Update Vehicle Odometer
     if (selectedVehicle && accumulatedDistance > 0.1) {
       addTripToOdometer(accumulatedDistance);
+
+      const safetyReport = safetyMonitor.getReport();
+
       Alert.alert(
         'Viagem Finalizada 🏁',
-        `+${accumulatedDistance.toFixed(1)} km adicionados ao odômetro do ${selectedVehicle.name}.`
+        `+${accumulatedDistance.toFixed(1)} km adicionados ao odômetro do ${selectedVehicle.name}.\n\n🛡️ Relatório de Segurança:\n${safetyReport}`
       );
     } else {
       Alert.alert('Viagem Encerrada', 'Distância muito curta para registro.');
@@ -807,22 +967,31 @@ export default function RouteScreen({ route }: any) {
     setUserLocation(null);
     setAccumulatedDistance(0);
     setAccumulatedCost(0);
-    setTollLocations([]);
 
+    // 3. Stop Location Watch
     if (locationSubscription.current) {
       locationSubscription.current.remove();
+      locationSubscription.current = null;
     }
-    locationSubscription.current = null;
 
-    // Reset Camera
-    if (routeData) {
-      mapRef.current?.animateToRegion({
-        latitude: routeData.origin.latitude,
-        longitude: routeData.origin.longitude,
-        latitudeDelta: 4,
-        longitudeDelta: 4,
-      }, 1000);
-    }
+    // 4. Return to Map Preview (reset camera)
+    mapRef.current?.animateToRegion({
+      latitude: routeData.origin.latitude,
+      longitude: routeData.origin.longitude,
+      latitudeDelta: 4,
+      longitudeDelta: 4,
+    }, 1000);
+  };
+
+  const stopNavigation = () => {
+    Alert.alert(
+      'Encerrar Viagem',
+      'Deseja finalizar a navegação e salvar o histórico?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Finalizar', style: 'destructive', onPress: finishTrip }
+      ]
+    );
   };
 
 
@@ -855,9 +1024,49 @@ export default function RouteScreen({ route }: any) {
       return `${minutes}m`;
     };
 
+
     return (
       <View style={{ flex: 1, backgroundColor: '#000' }}>
         <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+
+        {/* Telemetry HUD Overlay - Only visible when connected */}
+        {telemetry.isConnected && (
+          <View style={{
+            position: 'absolute',
+            top: 100,
+            right: 20,
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            padding: 10,
+            borderRadius: 12,
+            zIndex: 99,
+            width: 120
+          }}>
+            <Text style={{ color: '#aaa', fontSize: 10, marginBottom: 4, textAlign: 'center' }}>TELEMETRIA</Text>
+
+            <View style={{ alignItems: 'center', marginBottom: 8 }}>
+              <Text style={{ color: '#FFF', fontSize: 24, fontWeight: 'bold' }}>{telemetry.rpm}</Text>
+              <Text style={{ color: theme.colors.primary, fontSize: 10, fontWeight: 'bold' }}>RPM</Text>
+            </View>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+              <View style={{ alignItems: 'center' }}>
+                <FontAwesome5 name="thermometer-half" size={12} color="#EF4444" />
+                <Text style={{ color: '#FFF', fontSize: 12 }}>{telemetry.coolantTemp}°C</Text>
+              </View>
+              <View style={{ alignItems: 'center' }}>
+                <FontAwesome5 name="bolt" size={12} color="#F59E0B" />
+                <Text style={{ color: '#FFF', fontSize: 12 }}>{telemetry.voltage.toFixed(1)}V</Text>
+              </View>
+            </View>
+
+            <View style={{ marginTop: 4 }}>
+              <Text style={{ color: '#aaa', fontSize: 9 }}>Load: {telemetry.engineLoad}%</Text>
+              <View style={{ height: 4, backgroundColor: '#333', borderRadius: 2, marginTop: 2 }}>
+                <View style={{ width: `${telemetry.engineLoad}%`, height: '100%', backgroundColor: theme.colors.primary, borderRadius: 2 }} />
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* Map Full Screen */}
         <MapView
@@ -875,6 +1084,25 @@ export default function RouteScreen({ route }: any) {
           showsCompass={false}
         >
           <Polyline coordinates={routeData.coordinates} strokeWidth={5} strokeColor="#3B82F6" />
+
+          {/* Hazard Markers (Risk Engine) */}
+          {routeData.hazards && routeData.hazards.map((hazard, index) => (
+            <Marker
+              key={`h-${index}`}
+              coordinate={{ latitude: hazard.latitude, longitude: hazard.longitude }}
+              title={hazard.description}
+            >
+              <View style={{
+                backgroundColor: hazard.severity === 'critical' || hazard.severity === 'high' ? '#EF4444' : '#F59E0B',
+                padding: 4,
+                borderRadius: 12,
+                borderWidth: 2,
+                borderColor: '#FFF'
+              }}>
+                <FontAwesome5 name="exclamation" size={12} color="#FFF" />
+              </View>
+            </Marker>
+          ))}
 
           {/* Car Marker (Custom UI for user location if showsUserLocation is boring) */}
           {/* We can rely on showsUserLocation which uses the blue dot, or custom marker if we want a car icon */}
@@ -899,7 +1127,50 @@ export default function RouteScreen({ route }: any) {
             </View>
           )}
 
+          {/* ACTIVE HAZARD ALERT (Sprint 3) */}
+          {activeHazard && (
+            <View style={{ position: 'absolute', top: 160, alignSelf: 'center', backgroundColor: activeHazard.severity === 'critical' ? '#EF4444' : '#F59E0B', paddingVertical: 16, paddingHorizontal: 30, borderRadius: 30, zIndex: 999, elevation: 10, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 5 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <FontAwesome5 name="exclamation-triangle" size={24} color="white" style={{ marginRight: 12 }} />
+                <View>
+                  <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 18 }}>{activeHazard.description}</Text>
+                  {activeHazard.recommendedSpeed && <Text style={{ color: 'white', fontSize: 14 }}>Reduza para {activeHazard.recommendedSpeed} km/h</Text>}
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* Recenter Button FAB */}
+          {!isFollowingUser && (
+            <TouchableOpacity
+              onPress={recenterCamera}
+              style={{
+                position: 'absolute',
+                bottom: 180, // Above hazard alert
+                right: 20,
+                backgroundColor: theme.colors.surface,
+                width: 50,
+                height: 50,
+                borderRadius: 25,
+                alignItems: 'center',
+                justifyContent: 'center',
+                elevation: 5,
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.25,
+                shadowRadius: 3.84,
+                zIndex: 999
+              }}
+            >
+              <MaterialIcons name="my-location" size={30} color={theme.colors.primary} />
+            </TouchableOpacity>
+          )}
+
           <NavHeader>
+            <TouchableOpacity onPress={stopNavigation} style={{ marginRight: 16 }}>
+              <Ionicons name="arrow-back-circle" size={40} color="white" />
+            </TouchableOpacity>
+
             <TurnIcon>
               <MaterialIcons
                 name={currentStep.maneuver?.includes('left') ? 'turn-left' : currentStep.maneuver?.includes('right') ? 'turn-right' : 'arrow-upward'}
@@ -927,9 +1198,9 @@ export default function RouteScreen({ route }: any) {
                 <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10 }}>{accumulatedDistance.toFixed(1)} km rodados</Text>
               </View>
 
-              <SpeedContainer>
-                <SpeedText>{userSpeed}</SpeedText>
-                <SpeedLabel>km/h</SpeedLabel>
+              <SpeedContainer style={{ backgroundColor: isSpeeding ? '#EF4444' : '#f8f9fa', borderColor: isSpeeding ? '#B91C1C' : theme.colors.border }}>
+                <SpeedText style={{ color: isSpeeding ? '#FFF' : theme.colors.text }}>{userSpeed}</SpeedText>
+                <SpeedLabel style={{ color: isSpeeding ? 'rgba(255,255,255,0.8)' : theme.colors.textSecondary }}>km/h</SpeedLabel>
               </SpeedContainer>
             </View>
 
@@ -942,18 +1213,49 @@ export default function RouteScreen({ route }: any) {
     );
   }
 
+  // --- CITY MODE / PREVIEW UI ---
   return (
-    <Container showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+    <Container keyboardShouldPersistTaps="handled">
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+
       <Header>
-        <HeaderTitle>Planejamento</HeaderTitle>
-        <HeaderSubtitle>{origin && destination ? `${origin.split(',')[0]} ➔ ${destination.split(',')[0]}` : 'Defina seu trajeto'}</HeaderSubtitle>
+        <HeaderRow>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 4 }}>
+            <MaterialIcons name="arrow-back" size={28} color="#FFF" />
+          </TouchableOpacity>
+
+          <View style={{ flex: 1, alignItems: 'center', marginRight: 32 }}>
+            <HeaderTitle style={{ marginBottom: 0, textAlign: 'center' }}>
+              {cityMode ? 'Modo Urbano' : 'Planejar Rota'}
+            </HeaderTitle>
+          </View>
+
+          {/* OBD Toggle Button */}
+          <TouchableOpacity
+            onPress={() => {
+              const state = useTelemetryStore.getState();
+              if (state.isSimulating) obdService.stopSimulation();
+              else obdService.startSimulation();
+            }}
+            style={{
+              padding: 8,
+              backgroundColor: telemetry.isConnected ? 'rgba(255,255,255,0.2)' : 'transparent',
+              borderRadius: 8
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <FontAwesome5 name="microchip" size={20} color={telemetry.isConnected ? theme.colors.success : '#FFF'} />
+            </View>
+          </TouchableOpacity>
+        </HeaderRow>
       </Header>
 
-      <ScrollView contentContainerStyle={{ padding: 20 }}>
+      <ContentContainer>
         <Text style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 20, color: theme.colors.text }}>
-          {cityMode ? 'Para onde vamos?' : 'Planejar Rota'}
+          {routeOptions.length > 0 ? "Escolha a Rota" : "Para onde vamos?"}
         </Text>
+
+        {/* INPUTS AND REST OF UI */}
 
         {/* Origin Input (Hidden in City Mode) */}
         {!cityMode && (
@@ -1191,7 +1493,10 @@ export default function RouteScreen({ route }: any) {
           </PoiCard>
         </PoiScroll>
 
-      </ScrollView>
+      </ContentContainer>
+
+      {/* Helper Ref for camera following to avoid stale closure in watchPosition */}
+      {/* We use a ref in the component body instead of jsx, but this is a quick fix to show where logic resides */}
 
       {routeData && !cityMode ? (
         <View style={{ marginTop: 24, paddingBottom: 40, zIndex: 1, paddingHorizontal: 20 }}>
@@ -1220,14 +1525,21 @@ export default function RouteScreen({ route }: any) {
             </MapView>
           </MapContainer>
 
-          {/* Alert Card */}
-          <AlertBox>
-            <Row>
-              <AlertTitle>Atenção na Rodovia</AlertTitle>
-              <FontAwesome5 name="exclamation-triangle" color="#991B1B" />
-            </Row>
-            <AlertText>Trecho com possibilidade de chuvas isoladas. Mantenha distância segura.</AlertText>
-          </AlertBox>
+          {/* Weather Alert (Context) */}
+          {weather && (
+            <AlertBox style={{ backgroundColor: weather.isRaining ? '#FEF2F2' : '#EFF6FF', borderLeftColor: weather.isRaining ? '#EF4444' : '#3B82F6' }}>
+              <Row>
+                <AlertTitle style={{ color: weather.isRaining ? '#991B1B' : '#1E40AF' }}>
+                  {weather.condition} no Destino
+                </AlertTitle>
+                <Ionicons name={weather.isRaining ? "rainy" : "partly-sunny"} size={24} color={weather.isRaining ? "#991B1B" : "#1E40AF"} />
+              </Row>
+              <AlertText style={{ color: weather.isRaining ? '#B91C1C' : '#1E3A8A' }}>
+                {weather.description}, {weather.temp.toFixed(0)}°C.
+                {weather.isRaining ? " Pista molhada, reduza a velocidade." : " Condições favoráveis de visibilidade."}
+              </AlertText>
+            </AlertBox>
+          )}
 
           {/* Paradas Inteligentes */}
           <SectionTitle>Paradas Sugeridas (IA)</SectionTitle>

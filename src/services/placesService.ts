@@ -92,3 +92,55 @@ export const searchNearbyPlaces = async (
         return [];
     }
 };
+
+// Sampling utility
+const getSamplePoints = (coordinates: { latitude: number; longitude: number }[], intervalKm: number): { latitude: number; longitude: number }[] => {
+    if (!coordinates || coordinates.length === 0) return [];
+
+    // Always include start
+    const samples = [coordinates[0]];
+    let accumulatedDist = 0;
+
+    for (let i = 1; i < coordinates.length; i++) {
+        const prev = coordinates[i - 1];
+        const curr = coordinates[i];
+        const dist = Math.sqrt(Math.pow(curr.latitude - prev.latitude, 2) + Math.pow(curr.longitude - prev.longitude, 2)) * 111; // approx deg to km
+
+        accumulatedDist += dist;
+
+        if (accumulatedDist >= intervalKm) {
+            samples.push(curr);
+            accumulatedDist = 0;
+        }
+    }
+
+    // Always include end
+    if (samples[samples.length - 1] !== coordinates[coordinates.length - 1]) {
+        samples.push(coordinates[coordinates.length - 1]);
+    }
+
+    return samples;
+};
+
+export const searchPlacesAlongRoute = async (
+    routeCoordinates: { latitude: number; longitude: number }[],
+    type: 'gas_station' | 'restaurant' | 'hospital' | 'lodging'
+): Promise<PlaceResult[]> => {
+    // 1. Sample the route every 50km
+    const samples = getSamplePoints(routeCoordinates, 50);
+
+    // 2. Search at each sample point (Parallel requests)
+    // Constraint: Google Places API is expensive, so we limit samples or requests.
+    // For MVP, we will limit to max 3 samples (Start, Middle, End) if array is huge, or just the calculated samples.
+
+    const limitedSamples = samples.length > 5 ? [samples[0], samples[Math.floor(samples.length / 2)], samples[samples.length - 1]] : samples;
+
+    const promises = limitedSamples.map(point => searchNearbyPlaces(point.latitude, point.longitude, type, 3000)); // 3km radius
+    const resultsArray = await Promise.all(promises);
+
+    // 3. Deduplicate by place_id
+    const validPlaces = resultsArray.flat();
+    const uniquePlaces = Array.from(new Map(validPlaces.map(item => [item.place_id, item])).values());
+
+    return uniquePlaces;
+};
