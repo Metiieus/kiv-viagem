@@ -12,6 +12,8 @@ import { estimateTolls } from '../../../../utils/tollCalculator';
 import { getRecommendedStops, RouteStop } from '../../../../utils/stopRecommender';
 import { useVehicleStore } from '../../../garage/stores/useVehicleStore';
 import { calcDistKm } from '../../../../utils/geoUtils';
+import { useTelemetryStore } from '../../garage/stores/useTelemetryStore';
+import { obdService } from '../../garage/services/OBDService';
 import { MaterialIcons, FontAwesome5, FontAwesome6 } from '@expo/vector-icons';
 
 const Container = styled(ScrollView)`
